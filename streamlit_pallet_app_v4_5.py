@@ -7,10 +7,9 @@ import math
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
+from PIL import Image, ImageDraw
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.io as pio
 import streamlit as st
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.pagesizes import landscape, letter
@@ -56,6 +55,60 @@ def apply_custom_css():
         unsafe_allow_html=True,
     )
 
+
+def draw_pallet_image(pallet, placements, width=900, height=500):
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+
+    scale_x = width / pallet.base_length
+    scale_y = height / pallet.base_width
+
+    def scale(x, y, w, h):
+        return (
+            x * scale_x,
+            height - (y + h) * scale_y,
+            (x + w) * scale_x,
+            height - y * scale_y
+        )
+
+    # Draw pallet outer border
+    draw.rectangle(
+        scale(0, 0, pallet.base_length, pallet.base_width),
+        outline="black",
+        width=3
+    )
+
+    # Draw center beam
+    draw.rectangle(
+        scale(
+            0,
+            pallet.max_depth_per_side,
+            pallet.base_length,
+            pallet.center_depth
+        ),
+        fill="gray"
+    )
+
+    colors = [
+        "#d62728", "#1f77b4", "#2ca02c", "#ff7f0e",
+        "#9467bd", "#8c564b", "#e377c2", "#17becf"
+    ]
+
+    for p in placements:
+        color = colors[(p.config_id - 1) % len(colors)]
+
+        draw.rectangle(
+            scale(p.x, p.y, p.length, p.depth),
+            outline=color,
+            width=2
+        )
+
+    return img
+
+def pil_image_to_bytes(img):
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 # Data model
 
@@ -500,9 +553,6 @@ def to_excel_bytes(sheets: Dict[str, pd.DataFrame]) -> bytes:
 # PDF export helpers
 # ---------------------------------------------------------------------------
 
-def _fig_to_image_bytes(fig: go.Figure, width: int = 900, height: int = 500) -> bytes:
-    """Render a Plotly figure to a PNG byte string using kaleido."""
-    return pio.to_image(fig, format='png', width=width, height=height, scale=1.5)
 
 
 def _df_to_rl_table(df: pd.DataFrame, col_widths=None) -> Table:
@@ -622,10 +672,12 @@ def export_pdf_by_configuration(
             preview.placements or [],
             f'Pallet #{pallet_num} — {chosen_pallet.pallet_id}  ({units_on} units)',
         )
-        img_bytes = _fig_to_image_bytes(fig)
+        img = draw_pallet_image(chosen_pallet, preview.placements or [])
+        img_bytes = pil_image_to_bytes(img)
         img_buf = io.BytesIO(img_bytes)
         rl_img = RLImage(img_buf, width=9 * inch, height=5 * inch)
         story.append(rl_img)
+
         if pallet_num < pallet_count:
             story.append(PageBreak())
 
@@ -728,10 +780,14 @@ def export_pdf_by_job(
             load.placements,
             f'Job Pallet #{load.pallet_number} — {chosen_pallet.pallet_id}  ({load.units_on_pallet} units)',
         )
-        img_bytes = _fig_to_image_bytes(fig)
+
+        img = draw_pallet_image(chosen_pallet, preview.placements or [])
+        img_bytes = pil_image_to_bytes(img)
+        
         img_buf = io.BytesIO(img_bytes)
         rl_img = RLImage(img_buf, width=9 * inch, height=5 * inch)
         story.append(rl_img)
+
         if load.pallet_number < len(result.pallet_loads):
             story.append(PageBreak())
 
