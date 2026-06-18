@@ -4,3 +4,4 @@ plotly
 reportlab
 openpyxl
 pillow
+matplotlib
