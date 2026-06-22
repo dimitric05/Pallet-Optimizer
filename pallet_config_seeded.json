@@ -11,7 +11,7 @@
       "max_length": 58.0,
       "usable_space_per_side": 1218.0,
       "price_per_usable_sq_in": 0.0,
-      "pallet_cost": 135.0
+      "pallet_cost": 159.05
     },
     {
       "pallet_id": "72x46",
@@ -24,7 +24,7 @@
       "max_length": 70.0,
       "usable_space_per_side": 1470.0,
       "price_per_usable_sq_in": 0.0,
-      "pallet_cost": 144.8
+      "pallet_cost": 161.90
     },
     {
       "pallet_id": "96x46",
@@ -37,7 +37,7 @@
       "max_length": 94.0,
       "usable_space_per_side": 1974.0,
       "price_per_usable_sq_in": 0.0,
-      "pallet_cost": 163.2
+      "pallet_cost": 182.50
     },
     {
       "pallet_id": "108x46",
@@ -50,7 +50,7 @@
       "max_length": 106.0,
       "usable_space_per_side": 2226.0,
       "price_per_usable_sq_in": 0.0,
-      "pallet_cost": 178.2
+      "pallet_cost": 200.20
     },
     {
       "pallet_id": "120x46",
@@ -63,7 +63,7 @@
       "max_length": 118.0,
       "usable_space_per_side": 2478.0,
       "price_per_usable_sq_in": 0.0,
-      "pallet_cost": 182.1
+      "pallet_cost": 205.35
     }
   ],
   "global_rules": {
