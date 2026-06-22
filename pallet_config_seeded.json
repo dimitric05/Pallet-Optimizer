@@ -1,90 +1,76 @@
 {
-  "meta": {
-    "name": "Window Pallet Optimizer - Seeded Config",
-    "version": "0.2.0",
-    "notes": [
-      "This is a starter config meant to be easy to edit.",
-      "Some pallet values were seeded from formulas visible in the workbook and should be verified by the shipping team before production use.",
-      "If you need one-off rules later, add them in the Python script or add new fields to this JSON."
-    ]
-  },
-  "global_rules": {
-    "edge_clearance_max_inches": 3.0,
-    "use_two_sides": true,
-    "brace_height_ratio_required": 0.6666666667,
-    "objective_weights": {
-      "loose_units": 1000000,
-      "pallet_count": 10000,
-      "estimated_cost": 100,
-      "utilization": -100
-    }
-  },
-  "special_rules": {
-    "force_long_side_down_product_types": [
-      "DH"
-    ]
-  },
-  "depth_lookup_csv": "product_depths_extracted.csv",
   "pallets": [
     {
-      "pallet_id": "P60x46",
+      "pallet_id": "60x46",
       "base_length": 60.0,
       "base_width": 46.0,
-      "center_height": 56.0,
+      "center_height": 48.0,
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
       "max_height": 84.0,
-      "max_length": 60.0,
-      "usable_space_per_side": 2520.0,
-      "price_per_usable_sq_in": 0.0
+      "max_length": 58.0,
+      "usable_space_per_side": 1218.0,
+      "price_per_usable_sq_in": 0.0,
+      "pallet_cost": 135.0
     },
     {
-      "pallet_id": "P72x46",
+      "pallet_id": "72x46",
       "base_length": 72.0,
       "base_width": 46.0,
-      "center_height": 56.0,
+      "center_height": 48.0,
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
       "max_height": 84.0,
-      "max_length": 72.0,
-      "usable_space_per_side": 3024.0,
-      "price_per_usable_sq_in": 0.0478835979
+      "max_length": 70.0,
+      "usable_space_per_side": 1470.0,
+      "price_per_usable_sq_in": 0.0,
+      "pallet_cost": 144.8
     },
     {
-      "pallet_id": "P96x46",
+      "pallet_id": "96x46",
       "base_length": 96.0,
       "base_width": 46.0,
-      "center_height": 56.0,
+      "center_height": 48.0,
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
       "max_height": 84.0,
-      "max_length": 96.0,
-      "usable_space_per_side": 4032.0,
-      "price_per_usable_sq_in": 0.0404761905
+      "max_length": 94.0,
+      "usable_space_per_side": 1974.0,
+      "price_per_usable_sq_in": 0.0,
+      "pallet_cost": 163.2
     },
     {
-      "pallet_id": "P108x46",
+      "pallet_id": "108x46",
       "base_length": 108.0,
       "base_width": 46.0,
-      "center_height": 56.0,
+      "center_height": 48.0,
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
       "max_height": 84.0,
-      "max_length": 108.0,
-      "usable_space_per_side": 4536.0,
-      "price_per_usable_sq_in": 0.0392857143
+      "max_length": 106.0,
+      "usable_space_per_side": 2226.0,
+      "price_per_usable_sq_in": 0.0,
+      "pallet_cost": 178.2
     },
     {
-      "pallet_id": "P120x46",
+      "pallet_id": "120x46",
       "base_length": 120.0,
       "base_width": 46.0,
-      "center_height": 56.0,
+      "center_height": 48.0,
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
       "max_height": 84.0,
-      "max_length": 120.0,
-      "usable_space_per_side": 5040.0,
-      "price_per_usable_sq_in": 0.0361309524
+      "max_length": 118.0,
+      "usable_space_per_side": 2478.0,
+      "price_per_usable_sq_in": 0.0,
+      "pallet_cost": 182.1
     }
-  ]
+  ],
+  "global_rules": {
+    "use_two_sides": true,
+    "brace_height_ratio_required": 0.6667
+  },
+  "special_rules": {
+    "force_long_side_down_product_types": []
+  }
 }
