@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 from __future__ import annotations
 
 import io
@@ -21,22 +21,6 @@ from reportlab.platypus import (
     Image as RLImage, PageBreak, Paragraph, SimpleDocTemplate, Spacer,
     Table, TableStyle,
 )
-
-# =============================================================================
-# Styling / constants
-# =============================================================================
-
-# =============================================================================
-# Pallet sizes and prices are read exclusively from pallet_config_seeded.json.
-# They can be edited in the app via the "Pallet Settings" mode in the sidebar
-# (add / remove / edit pallet sizes and costs — changes are written back to
-# the JSON file), or by editing the JSON directly.  Example pallet entry:
-#   { "pallet_id": "P96x46", "base_length": 96, "base_width": 46,
-#     ..., "pallet_cost": 182.50 }
-# If a pallet has no "pallet_cost" in the JSON, its cost is treated as $0.00
-# and a warning is shown in the app.
-# =============================================================================
-
 
 def apply_custom_css():
     st.markdown(
@@ -185,28 +169,11 @@ class SideState:
     counts: Dict[int, int]
     rows: List[Tuple[int, OrientationOption, int]]
 
-
-# =============================================================================
-# Paths / cached loaders
-# =============================================================================
-
-# ---------------------------------------------------------------------------
-# Path resolution and first-run setup. See _resolve_data_dir() and
-# ensure_data_files() below for where the editable config / depth files live
-# and how the defaults are seeded the first time the app runs.
-# ---------------------------------------------------------------------------
 import os
 import sys as _sys
 
-
 def _resolve_data_dir() -> Path:
-    # User data (the editable pallet config + product-depth table) lives in a
-    # writable per-user directory so the packaged .exe works for any user
-    # without admin rights.
-    #   * PALLET_OPTIMIZER_DATA_DIR env var overrides everything (point this at
-    #     a shared/IT-managed folder to give every user the same config).
-    #   * Frozen .exe (no override):  %LOCALAPPDATA%\PalletOptimizer
-    #   * Running from source (dev):  the folder containing this .py file.
+
     override = os.environ.get('PALLET_OPTIMIZER_DATA_DIR', '').strip()
     if override:
         return Path(override)
@@ -221,9 +188,7 @@ DEFAULT_CONFIG_PATH    = APP_DIR / 'pallet_config_seeded.json'
 DEFAULT_DEPTH_CSV_PATH = APP_DIR / 'product_depths_extracted.csv'
 
 
-# Default file contents written on first run.  These mirror the values the app
-# has shipped with.  Editing pallets in-app (Pallet Settings) or editing the
-# files in the data directory overrides them from then on.
+
 DEFAULT_PALLET_CONFIG_JSON = '''{
   "pallets": [
     {
@@ -326,7 +291,7 @@ EE8300,PW,3.5,4.0
 '''
 
 
-def ensure_data_files() -> None:
+def ensure_data_files() -> None:                                                                                            #how bored are u if u r reading this
     """First-run setup: create the data directory and seed the default pallet
     config and product-depth table if they don't exist yet.  Never overwrites
     files the user has already created or edited.  Returns nothing; safe to
@@ -346,11 +311,6 @@ def load_config(config_path: str) -> dict:
 @st.cache_data
 def load_depths(csv_path: str) -> pd.DataFrame:
     return pd.read_csv(csv_path)
-
-
-# =============================================================================
-# Shared helpers
-# =============================================================================
 
 class ProductDepthLookup:
     def __init__(self, df: pd.DataFrame):
@@ -399,8 +359,6 @@ class BaseOptimizer:
         for p in config['pallets']:
             if self.allowed_pallet_ids is not None and p.get('pallet_id') not in self.allowed_pallet_ids:
                 continue
-            # Keep only fields the Pallet dataclass knows about so older config
-            # files with extra keys (e.g. price_per_usable_sq_in) still load.
             known_fields = {f.name for f in fields(Pallet)}
             p = {k: v for k, v in p.items() if k in known_fields}
             # Pallet cost comes exclusively from the JSON config.
@@ -431,7 +389,7 @@ class BaseOptimizer:
         if ptype in self.force_long_side_down_types:
             return [('long_side_down', long_side, short_side)]
         return [('short_side_down', short_side, long_side), ('long_side_down', long_side, short_side)]
-
+                                                                                                                                    #how bored am i if i wrote this
     @staticmethod
     def split_units_across_sides(units_on_pallet: int, sides_used: int) -> Tuple[int, int]:
         if sides_used <= 1:
@@ -483,10 +441,6 @@ class BaseOptimizer:
         return (pallet.usable_space_per_side or 0.0) * sides_used
 
 
-# =============================================================================
-# Export helpers
-# =============================================================================
-
 def to_excel_bytes(sheets: Dict[str, pd.DataFrame]) -> bytes:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -495,10 +449,6 @@ def to_excel_bytes(sheets: Dict[str, pd.DataFrame]) -> bytes:
     output.seek(0)
     return output.getvalue()
 
-
-# ---------------------------------------------------------------------------
-# PDF export helpers
-# ---------------------------------------------------------------------------
 
 def _fig_to_image_bytes(fig: go.Figure, width: int = 900, height: int = 500) -> bytes:
     """Render a Plotly figure to a PNG byte string using kaleido."""
@@ -828,11 +778,6 @@ def export_by_job(configs: List[ConfigurationItem], result: JobPlanResult, allow
             side_rows.append({'Pallet #': load.pallet_number, 'Pallet Type': load.pallet_id, 'Configuration': label_lookup.get(cid, f'Config {cid}'), 'Top Side': top_count, 'Bottom Side': bottom_count, 'Difference': diff, 'Status': status})
     return to_excel_bytes({'Summary': summary, 'Configurations': configs_df, 'Pallet Mix': mix_df, 'Per Pallet': per_pallet, 'Side Split': pd.DataFrame(side_rows)})
 
-
-# =============================================================================
-# Optimizers
-# =============================================================================
-
 class SingleConfigOptimizer(BaseOptimizer):
     def build_preview_placements(self, pallet: Pallet, orientation_name: str, base_side: float, ship_depth: float,
                                  top_rows: List[int], bottom_rows: List[int], config_label: str = 'Config 1', config_id: int = 1) -> List[Placement]:
@@ -852,7 +797,7 @@ class SingleConfigOptimizer(BaseOptimizer):
         # Bottom side: cursor starts at the center beam bottom edge and moves
         # outward (decreasing Y) by each row's depth.
         bottom_y_cursor = pallet.max_depth_per_side
-        for row_index, row_count in enumerate(bottom_rows, start=1):
+        for row_index, row_count in enumerate(bottom_rows, start=1):                        
             bottom_y_cursor -= ship_depth
             row_y = bottom_y_cursor
             x_positions, _ = self.compute_row_positions(pallet.max_length, base_side, row_count)
@@ -1698,7 +1643,6 @@ def main():
         if optimizer.pallets_missing_cost:
             st.sidebar.warning(f"No pallet_cost set in the config JSON for: {', '.join(optimizer.pallets_missing_cost)}. Costs will show as $0.00. Add a \"pallet_cost\" value to each pallet entry in pallet_config_seeded.json.")
 
-        # ── Job setup: naming / save / load (top of main UI) ─────────────────
         st.subheader('Mixed Configuration Job Setup')
         setup_c1, setup_c2, setup_c3 = st.columns([1.2, 0.8, 1.4])
         with setup_c1:
@@ -1756,7 +1700,6 @@ def main():
         if not items:
             st.session_state['selected_job_row_v37'] = 1
 
-        # ── Add / Edit configuration (user input, top of main UI) ───────────
         st.subheader('Add / Edit Configuration')
         ensure_job_form_defaults(lookup)
         current_sig = (str(st.session_state.get('jf_family', '')).strip(), str(st.session_state.get('jf_type', '')).strip(), int(st.session_state.get('jf_depth_option', 1)))
@@ -1813,7 +1756,6 @@ def main():
                     load_form_from_item(st.session_state['job_items_v37'][st.session_state['selected_job_row_v37'] - 1])
             st.rerun()
 
-        # ── Configuration list (below the user input) ────────────────────────
         st.subheader('Configuration List')
         st.dataframe(build_job_items_df(items), use_container_width=True, hide_index=True)
         if items:
@@ -1855,10 +1797,7 @@ def main():
                 st.dataframe(pallet_mix_table(best_job.pallet_mix_summary, optimizer), use_container_width=True, hide_index=True)
                 dl_col1, dl_col2 = st.columns(2)
                 dl_col1.download_button('Export Summary (.xlsx)', data=export_by_job(configs, best_job, allowable_pallets), file_name='pallet_summary_by_job.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-                # PDF is expensive (kaleido renders every pallet image).
-                # Only generate when explicitly requested. A single fixed
-                # session key holds the latest PDF (with a signature of the
-                # inputs) so old reports don't pile up in session memory.
+
                 job_pdf_sig = (best_job.pallets_needed, best_job.total_units, best_job.estimated_total_cost, job_name)
                 if dl_col2.button('Generate PDF Report', key='gen_pdf_job'):
                     try:
