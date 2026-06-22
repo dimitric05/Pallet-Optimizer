@@ -1388,7 +1388,7 @@ def clean_string_values(series: pd.Series) -> List[str]:
 
 
 def build_default_job_items(lookup: ProductDepthLookup) -> List[dict]:
-    seeds = [('Cfg 1', 'AA4325', 'PI', 1, 33.438, 18.0, 28), ('Cfg 2', 'AA4325', 'PI', 1, 35.563, 18.0, 12), ('Cfg 3', 'AA4325', 'PI', 1, 37.625, 18.0, 8)]
+    seeds = [('Cfg 1', 'AA4325', 'PI', 1, 33.438, 18.0, 28)]
     out = []
     for label, fam, typ, depth_option, width, height, qty in seeds:
         d = lookup.get_default_depth(fam, typ, depth_option)
