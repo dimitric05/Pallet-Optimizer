@@ -8,7 +8,7 @@
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
       "max_height": 84.0,
-      "max_length": 58.0,
+      "max_length": 60.0,
       "usable_space_per_side": 1218.0,
       "price_per_usable_sq_in": 0.0,
       "pallet_cost": 159.05
@@ -21,7 +21,7 @@
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
       "max_height": 84.0,
-      "max_length": 70.0,
+      "max_length": 72.0,
       "usable_space_per_side": 1470.0,
       "price_per_usable_sq_in": 0.0,
       "pallet_cost": 161.90
@@ -34,7 +34,7 @@
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
       "max_height": 84.0,
-      "max_length": 94.0,
+      "max_length": 96.0,
       "usable_space_per_side": 1974.0,
       "price_per_usable_sq_in": 0.0,
       "pallet_cost": 182.50
@@ -47,7 +47,7 @@
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
       "max_height": 84.0,
-      "max_length": 106.0,
+      "max_length": 108.0,
       "usable_space_per_side": 2226.0,
       "price_per_usable_sq_in": 0.0,
       "pallet_cost": 200.20
@@ -60,7 +60,7 @@
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
       "max_height": 84.0,
-      "max_length": 118.0,
+      "max_length": 120.0,
       "usable_space_per_side": 2478.0,
       "price_per_usable_sq_in": 0.0,
       "pallet_cost": 205.35
