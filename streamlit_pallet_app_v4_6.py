@@ -160,6 +160,7 @@ class JobPlanResult:
     total_balance_penalty: Optional[float]
     pallet_mix_summary: Dict[str, int]
     estimated_total_cost: float = 0.0
+    excluded_configs: Optional[List[Tuple[str, str]]] = None  # (label, reason) for configs that fit no pallet
 
 
 @dataclass
@@ -1171,10 +1172,37 @@ class MixedJobOptimizer(BaseOptimizer):
         remaining = {c.config_id: int(c.qty) for c in configs}
         all_feasible = self.all_feasible_options_by_pallet(configs)
         difficulty = self.config_difficulty_scores(configs, all_feasible)
+        # Separate configs that fit no pallet from those that do.  Rather than
+        # aborting the whole job when one window is infeasible, we plan the
+        # feasible configs and report the excluded ones so the user knows
+        # exactly which windows must be handled outside the tool.
+        excluded: List[Tuple[str, str]] = []
+        feasible_configs: List[ConfigurationItem] = []
         for c in configs:
             feasible_any = any(all_feasible[pallet.pallet_id].get(c.config_id) for pallet in self.pallets)
-            if not feasible_any:
-                return JobPlanResult(False, None, sum(c.qty for c in configs), None, None, [], 'At least one configuration fits no selected pallet type under the current rules.', None, {}, 0.0)
+            if feasible_any:
+                feasible_configs.append(c)
+            else:
+                # Build a concise reason by inspecting the largest pallet.
+                widest = max(self.pallets, key=lambda p: p.max_length)
+                long_side = max(c.width, c.height)
+                if long_side > widest.max_length:
+                    reason = (f'long side {long_side:.0f}" exceeds largest pallet length '
+                              f'{widest.max_length:.0f}"')
+                else:
+                    reason = 'fails height or brace rule on all pallets'
+                excluded.append((c.label, reason))
+
+        if not feasible_configs:
+            detail = '; '.join(f'{lbl} ({rsn})' for lbl, rsn in excluded)
+            return JobPlanResult(False, None, sum(c.qty for c in configs), None, None, [],
+                'No configuration fits any selected pallet under the current rules. '
+                f'Excluded: {detail}', None, {}, 0.0, excluded)
+
+        # From here on, only plan the feasible configs.
+        configs = feasible_configs
+        config_map = {c.config_id: c for c in configs}
+        remaining = {c.config_id: int(c.qty) for c in configs}
         pallet_loads: List[JobPalletLoad] = []
         pallet_mix_summary: Dict[str, int] = {}
         total_used_area = 0.0
@@ -1208,7 +1236,11 @@ class MixedJobOptimizer(BaseOptimizer):
         overall_utilization = (total_used_area / total_usable_area) if total_usable_area else 0.0
         avg_utilization = (sum(load.preview_utilization for load in pallet_loads) / pallets_needed) if pallets_needed else 0.0
         explanation = f'Job plan built pallet-by-pallet using mixed pallet sizes. Total pallets needed = {pallets_needed}. Overall utilization = {overall_utilization:.2%}. Average pallet utilization = {avg_utilization:.2%}. Estimated total pallet cost = ${total_cost:,.2f}. Combined supported base widths from the center outward satisfy the non-increasing pyramid support rule on each pallet. Balance information is warning-only and does not drive pallet selection. By Job objective: fit all windows across the fewest selected pallets possible using the allowable pallet sizes.'
-        return JobPlanResult(True, pallets_needed, total_units, overall_utilization, avg_utilization, pallet_loads, explanation, total_balance_penalty, pallet_mix_summary, total_cost)
+        if excluded:
+            excl_detail = '; '.join(f'{lbl} ({rsn})' for lbl, rsn in excluded)
+            explanation += (f' NOTE: {len(excluded)} configuration(s) were excluded because they '
+                            f'fit no selected pallet and must be handled outside the tool: {excl_detail}.')
+        return JobPlanResult(True, pallets_needed, total_units, overall_utilization, avg_utilization, pallet_loads, explanation, total_balance_penalty, pallet_mix_summary, total_cost, excluded)
 
     def evaluate_job(self, configs: List[ConfigurationItem]) -> JobPlanResult:
         return self.build_job_plan(configs)
@@ -1694,6 +1726,33 @@ def main():
                     st.error(f'Could not load job file: {exc}')
                     st.session_state['job_loaded_sig_v45'] = load_sig
 
+        # ── Reset all configurations (sits next to Save / Load) ──────────────
+        _reset_items = st.session_state['job_items_v37']
+        if not st.session_state.get('confirm_reset_v46', False):
+            if st.button('Reset All Configurations', use_container_width=True,
+                         disabled=not bool(_reset_items),
+                         help='Clears every configuration currently loaded into the Pallet Optimizer.'):
+                st.session_state['confirm_reset_v46'] = True
+                st.rerun()
+        else:
+            st.warning(
+                f'This will clear all {len(_reset_items)} configuration(s) loaded into the Pallet Optimizer. '
+                'This cannot be undone. Use Save Job (.json) first if you want to keep this job.'
+            )
+            reset_c1, reset_c2 = st.columns(2)
+            if reset_c1.button('Yes, clear all configurations', type='primary', use_container_width=True):
+                st.session_state['job_items_v37'] = []
+                st.session_state['selected_job_row_v37'] = 1
+                st.session_state['confirm_reset_v46'] = False
+                for k in list(st.session_state.keys()):
+                    if str(k).startswith('pdf_job_'):
+                        del st.session_state[k]
+                st.success('All configurations cleared.')
+                st.rerun()
+            if reset_c2.button('Cancel', use_container_width=True):
+                st.session_state['confirm_reset_v46'] = False
+                st.rerun()
+
         items = st.session_state['job_items_v37']
         if items and st.session_state['selected_job_row_v37'] > len(items):
             st.session_state['selected_job_row_v37'] = len(items)
@@ -1793,6 +1852,13 @@ def main():
                 c2.metric('Pallet Types Used', len(best_job.pallet_mix_summary))
                 c3.metric('Balance Warning Total', f'{(best_job.total_balance_penalty or 0.0):.1f}')
                 st.success('A mixed-pallet job plan was found under the selected pallet list and the corrected pyramid support rule.')
+                if best_job.excluded_configs:
+                    excl_lines = '\n'.join(f'- **{lbl}** — {rsn}' for lbl, rsn in best_job.excluded_configs)
+                    st.warning(
+                        f'{len(best_job.excluded_configs)} configuration(s) could not be placed on any '
+                        f'selected pallet and were excluded from this plan. Handle these outside the tool:\n\n'
+                        + excl_lines
+                    )
                 st.markdown(f'**Explanation:** {best_job.explanation}')
                 st.dataframe(pallet_mix_table(best_job.pallet_mix_summary, optimizer), use_container_width=True, hide_index=True)
                 dl_col1, dl_col2 = st.columns(2)
