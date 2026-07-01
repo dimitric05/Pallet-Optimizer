@@ -1676,7 +1676,7 @@ def main():
             st.sidebar.warning(f"No pallet_cost set in the config JSON for: {', '.join(optimizer.pallets_missing_cost)}. Costs will show as $0.00. Add a \"pallet_cost\" value to each pallet entry in pallet_config_seeded.json.")
 
         st.subheader('Mixed Configuration Job Setup')
-        setup_c1, setup_c2, setup_c3 = st.columns([1.2, 0.8, 1.4])
+        setup_c1, setup_c2, setup_c3, setup_c4 = st.columns([1.2, 0.8, 1.4, 0.8])
         with setup_c1:
             job_name = st.text_input('Job Name', value=st.session_state.get('job_name_v45', ''), help='Optional. Appears on the PDF report title and summary.')
             st.session_state['job_name_v45'] = job_name
@@ -1699,6 +1699,13 @@ def main():
         with setup_c3:
             uploaded_job = st.file_uploader('Load Job (.json)', type=['json'], key='job_loader_v45',
                                             help='Restores a previously saved job, replacing the current configuration list.')
+        with setup_c4:
+            st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
+            if st.button('Reset', use_container_width=True,
+                         disabled=not bool(st.session_state['job_items_v37']),
+                         help='Clears every configuration currently loaded into the Pallet Optimizer.'):
+                st.session_state['confirm_reset_v46'] = True
+                st.rerun()
         if uploaded_job is not None:
             load_sig = (uploaded_job.name, uploaded_job.size)
             if st.session_state.get('job_loaded_sig_v45') != load_sig:
@@ -1726,21 +1733,15 @@ def main():
                     st.error(f'Could not load job file: {exc}')
                     st.session_state['job_loaded_sig_v45'] = load_sig
 
-        # ── Reset all configurations (sits next to Save / Load) ──────────────
-        _reset_items = st.session_state['job_items_v37']
-        if not st.session_state.get('confirm_reset_v46', False):
-            if st.button('Reset All Configurations', use_container_width=True,
-                         disabled=not bool(_reset_items),
-                         help='Clears every configuration currently loaded into the Pallet Optimizer.'):
-                st.session_state['confirm_reset_v46'] = True
-                st.rerun()
-        else:
+        # ── Reset confirmation (triggered by the Reset button next to Load Job) ──
+        if st.session_state.get('confirm_reset_v46', False):
+            _reset_items = st.session_state['job_items_v37']
             st.warning(
                 f'This will clear all {len(_reset_items)} configuration(s) loaded into the Pallet Optimizer. '
                 'This cannot be undone. Use Save Job (.json) first if you want to keep this job.'
             )
-            reset_c1, reset_c2 = st.columns(2)
-            if reset_c1.button('Yes, clear all configurations', type='primary', use_container_width=True):
+            reset_c1, reset_c2, _reset_spacer = st.columns([1, 1, 3])
+            if reset_c1.button('Yes, clear all', type='primary', use_container_width=True):
                 st.session_state['job_items_v37'] = []
                 st.session_state['selected_job_row_v37'] = 1
                 st.session_state['confirm_reset_v46'] = False
