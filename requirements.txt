@@ -1,7 +1,10 @@
-streamlit
-pandas
-plotly
-reportlab
-openpyxl
+streamlit=1.40.2
+pandas=2.2.3
+numpy=1.26.4
+plotly=5.24.1
+reportlab=4.2.5
+openpyxl=3.1.5
+reportlab=4.2.5
+kaleido=0.2.1
 pillow
 matplotlib
