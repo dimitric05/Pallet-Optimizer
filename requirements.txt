@@ -6,3 +6,4 @@ reportlab
 openpyxl
 kaleido
 pillow
+matplotlib
