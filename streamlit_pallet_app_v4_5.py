@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 from __future__ import annotations
 
 import io
@@ -7,9 +7,10 @@ import math
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from PIL import Image, ImageDraw
+
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.pagesizes import landscape, letter
@@ -20,22 +21,6 @@ from reportlab.platypus import (
     Image as RLImage, PageBreak, Paragraph, SimpleDocTemplate, Spacer,
     Table, TableStyle,
 )
-
-# =============================================================================
-# Styling / constants
-# =============================================================================
-
-# =============================================================================
-# Pallet sizes and prices are read exclusively from pallet_config_seeded.json.
-# They can be edited in the app via the "Pallet Settings" mode in the sidebar
-# (add / remove / edit pallet sizes and costs — changes are written back to
-# the JSON file), or by editing the JSON directly.  Example pallet entry:
-#   { "pallet_id": "P96x46", "base_length": 96, "base_width": 46,
-#     ..., "pallet_cost": 182.50 }
-# If a pallet has no "pallet_cost" in the JSON, its cost is treated as $0.00
-# and a warning is shown in the app.
-# =============================================================================
-
 
 def apply_custom_css():
     st.markdown(
@@ -55,60 +40,6 @@ def apply_custom_css():
         unsafe_allow_html=True,
     )
 
-
-def draw_pallet_image(pallet, placements, width=900, height=500):
-    img = Image.new("RGB", (width, height), "white")
-    draw = ImageDraw.Draw(img)
-
-    scale_x = width / pallet.base_length
-    scale_y = height / pallet.base_width
-
-    def scale(x, y, w, h):
-        return (
-            x * scale_x,
-            height - (y + h) * scale_y,
-            (x + w) * scale_x,
-            height - y * scale_y
-        )
-
-    # Draw pallet outer border
-    draw.rectangle(
-        scale(0, 0, pallet.base_length, pallet.base_width),
-        outline="black",
-        width=3
-    )
-
-    # Draw center beam
-    draw.rectangle(
-        scale(
-            0,
-            pallet.max_depth_per_side,
-            pallet.base_length,
-            pallet.center_depth
-        ),
-        fill="gray"
-    )
-
-    colors = [
-        "#d62728", "#1f77b4", "#2ca02c", "#ff7f0e",
-        "#9467bd", "#8c564b", "#e377c2", "#17becf"
-    ]
-
-    for p in placements:
-        color = colors[(p.config_id - 1) % len(colors)]
-
-        draw.rectangle(
-            scale(p.x, p.y, p.length, p.depth),
-            outline=color,
-            width=2
-        )
-
-    return img
-
-def pil_image_to_bytes(img):
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
 
 # Data model
 
@@ -229,6 +160,7 @@ class JobPlanResult:
     total_balance_penalty: Optional[float]
     pallet_mix_summary: Dict[str, int]
     estimated_total_cost: float = 0.0
+    excluded_configs: Optional[List[Tuple[str, str]]] = None  # (label, reason) for configs that fit no pallet
 
 
 @dataclass
@@ -238,28 +170,11 @@ class SideState:
     counts: Dict[int, int]
     rows: List[Tuple[int, OrientationOption, int]]
 
-
-# =============================================================================
-# Paths / cached loaders
-# =============================================================================
-
-# ---------------------------------------------------------------------------
-# Path resolution and first-run setup. See _resolve_data_dir() and
-# ensure_data_files() below for where the editable config / depth files live
-# and how the defaults are seeded the first time the app runs.
-# ---------------------------------------------------------------------------
 import os
 import sys as _sys
 
-
 def _resolve_data_dir() -> Path:
-    # User data (the editable pallet config + product-depth table) lives in a
-    # writable per-user directory so the packaged .exe works for any user
-    # without admin rights.
-    #   * PALLET_OPTIMIZER_DATA_DIR env var overrides everything (point this at
-    #     a shared/IT-managed folder to give every user the same config).
-    #   * Frozen .exe (no override):  %LOCALAPPDATA%\PalletOptimizer
-    #   * Running from source (dev):  the folder containing this .py file.
+
     override = os.environ.get('PALLET_OPTIMIZER_DATA_DIR', '').strip()
     if override:
         return Path(override)
@@ -274,9 +189,7 @@ DEFAULT_CONFIG_PATH    = APP_DIR / 'pallet_config_seeded.json'
 DEFAULT_DEPTH_CSV_PATH = APP_DIR / 'product_depths_extracted.csv'
 
 
-# Default file contents written on first run.  These mirror the values the app
-# has shipped with.  Editing pallets in-app (Pallet Settings) or editing the
-# files in the data directory overrides them from then on.
+
 DEFAULT_PALLET_CONFIG_JSON = '''{
   "pallets": [
     {
@@ -379,7 +292,7 @@ EE8300,PW,3.5,4.0
 '''
 
 
-def ensure_data_files() -> None:
+def ensure_data_files() -> None:                                                                                            #how bored are u if u r reading this
     """First-run setup: create the data directory and seed the default pallet
     config and product-depth table if they don't exist yet.  Never overwrites
     files the user has already created or edited.  Returns nothing; safe to
@@ -399,11 +312,6 @@ def load_config(config_path: str) -> dict:
 @st.cache_data
 def load_depths(csv_path: str) -> pd.DataFrame:
     return pd.read_csv(csv_path)
-
-
-# =============================================================================
-# Shared helpers
-# =============================================================================
 
 class ProductDepthLookup:
     def __init__(self, df: pd.DataFrame):
@@ -452,8 +360,6 @@ class BaseOptimizer:
         for p in config['pallets']:
             if self.allowed_pallet_ids is not None and p.get('pallet_id') not in self.allowed_pallet_ids:
                 continue
-            # Keep only fields the Pallet dataclass knows about so older config
-            # files with extra keys (e.g. price_per_usable_sq_in) still load.
             known_fields = {f.name for f in fields(Pallet)}
             p = {k: v for k, v in p.items() if k in known_fields}
             # Pallet cost comes exclusively from the JSON config.
@@ -484,7 +390,7 @@ class BaseOptimizer:
         if ptype in self.force_long_side_down_types:
             return [('long_side_down', long_side, short_side)]
         return [('short_side_down', short_side, long_side), ('long_side_down', long_side, short_side)]
-
+                                                                                                                                    #how bored am i if i wrote this
     @staticmethod
     def split_units_across_sides(units_on_pallet: int, sides_used: int) -> Tuple[int, int]:
         if sides_used <= 1:
@@ -536,10 +442,6 @@ class BaseOptimizer:
         return (pallet.usable_space_per_side or 0.0) * sides_used
 
 
-# =============================================================================
-# Export helpers
-# =============================================================================
-
 def to_excel_bytes(sheets: Dict[str, pd.DataFrame]) -> bytes:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -549,10 +451,9 @@ def to_excel_bytes(sheets: Dict[str, pd.DataFrame]) -> bytes:
     return output.getvalue()
 
 
-# ---------------------------------------------------------------------------
-# PDF export helpers
-# ---------------------------------------------------------------------------
-
+def _fig_to_image_bytes(fig: go.Figure, width: int = 900, height: int = 500) -> bytes:
+    """Render a Plotly figure to a PNG byte string using kaleido."""
+    return pio.to_image(fig, format='png', width=width, height=height, scale=1.5)
 
 
 def _df_to_rl_table(df: pd.DataFrame, col_widths=None) -> Table:
@@ -667,17 +568,14 @@ def export_pdf_by_configuration(
     for pallet_num in range(1, pallet_count + 1):
         units_on = optimizer.units_for_pallet_sequence(job.qty, best.max_units_per_pallet or 1, pallet_num)
         preview = optimizer.build_preview_for_units(chosen_pallet, best, units_on, pallet_num)
-        fig = build_plotly_preview(
+        img_bytes = _pallet_png_bytes(
             chosen_pallet,
             preview.placements or [],
             f'Pallet #{pallet_num} — {chosen_pallet.pallet_id}  ({units_on} units)',
         )
-        img = draw_pallet_image(chosen_pallet, preview.placements or [])
-        img_bytes = pil_image_to_bytes(img)
         img_buf = io.BytesIO(img_bytes)
         rl_img = RLImage(img_buf, width=9 * inch, height=5 * inch)
         story.append(rl_img)
-
         if pallet_num < pallet_count:
             story.append(PageBreak())
 
@@ -775,19 +673,14 @@ def export_pdf_by_job(
     story.append(Spacer(1, 0.1 * inch))
     for load in result.pallet_loads:
         chosen_pallet = optimizer.pallet_by_id(load.pallet_id)
-        fig = build_plotly_preview(
+        img_bytes = _pallet_png_bytes(
             chosen_pallet,
             load.placements,
             f'Job Pallet #{load.pallet_number} — {chosen_pallet.pallet_id}  ({load.units_on_pallet} units)',
         )
-
-        img = draw_pallet_image(chosen_pallet, preview.placements or [])
-        img_bytes = pil_image_to_bytes(img)
-        
         img_buf = io.BytesIO(img_bytes)
         rl_img = RLImage(img_buf, width=9 * inch, height=5 * inch)
         story.append(rl_img)
-
         if load.pallet_number < len(result.pallet_loads):
             story.append(PageBreak())
 
@@ -886,11 +779,6 @@ def export_by_job(configs: List[ConfigurationItem], result: JobPlanResult, allow
             side_rows.append({'Pallet #': load.pallet_number, 'Pallet Type': load.pallet_id, 'Configuration': label_lookup.get(cid, f'Config {cid}'), 'Top Side': top_count, 'Bottom Side': bottom_count, 'Difference': diff, 'Status': status})
     return to_excel_bytes({'Summary': summary, 'Configurations': configs_df, 'Pallet Mix': mix_df, 'Per Pallet': per_pallet, 'Side Split': pd.DataFrame(side_rows)})
 
-
-# =============================================================================
-# Optimizers
-# =============================================================================
-
 class SingleConfigOptimizer(BaseOptimizer):
     def build_preview_placements(self, pallet: Pallet, orientation_name: str, base_side: float, ship_depth: float,
                                  top_rows: List[int], bottom_rows: List[int], config_label: str = 'Config 1', config_id: int = 1) -> List[Placement]:
@@ -910,7 +798,7 @@ class SingleConfigOptimizer(BaseOptimizer):
         # Bottom side: cursor starts at the center beam bottom edge and moves
         # outward (decreasing Y) by each row's depth.
         bottom_y_cursor = pallet.max_depth_per_side
-        for row_index, row_count in enumerate(bottom_rows, start=1):
+        for row_index, row_count in enumerate(bottom_rows, start=1):                        
             bottom_y_cursor -= ship_depth
             row_y = bottom_y_cursor
             x_positions, _ = self.compute_row_positions(pallet.max_length, base_side, row_count)
@@ -1072,7 +960,7 @@ class MixedJobOptimizer(BaseOptimizer):
     def candidate_rows_for_side(self, side, other_side, remaining, options_by_config, pallet):
         candidates = []
     
-        # last row width on this side (closest-to-center is row 1; outward increases)
+        
         if side.rows:
             last_width = self._row_widths_from_side_rows(side.rows)[-1]
         else:
@@ -1136,6 +1024,96 @@ class MixedJobOptimizer(BaseOptimizer):
                         candidates.append((cid, opt, row_count))
     
         return candidates
+
+    def build_single_pallet_candidate_ordered(self, pallet: Pallet, remaining: Dict[int, int],
+                                              config_map: Dict[int, ConfigurationItem],
+                                              options_by_config: Dict[int, List[OrientationOption]],
+                                              order_index: Dict[int, int]) -> Optional[JobPalletLoad]:
+        """
+        Ordered variant of build_single_pallet_candidate.
+
+        Fills a pallet respecting configuration-list order: the earliest
+        remaining config (lowest order_index) is placed first and fully before
+        a later config is pulled onto the same pallet. Later configs stack onto
+        leftover space when the per-side taper rule still passes. This is what
+        lets Row 2 top off Row 1's pallet instead of always opening a new one.
+        """
+        feasible_ids = [cid for cid, qty in remaining.items() if qty > 0 and options_by_config.get(cid)]
+        if not feasible_ids:
+            return None
+        # Seed with the earliest-order config (not difficulty).
+        seed_id = min(feasible_ids, key=lambda cid: order_index.get(cid, 10**9))
+        top = SideState('top', pallet.max_depth_per_side, {cid: 0 for cid in remaining}, [])
+        bottom = SideState('bottom', pallet.max_depth_per_side, {cid: 0 for cid in remaining}, [])
+        local_remaining = dict(remaining)
+
+        def choose_best_candidate(side: SideState, other_side: SideState) -> Optional[Tuple[int, OrientationOption, int, float]]:
+            cands = self.candidate_rows_for_side(side, other_side, local_remaining, options_by_config, pallet)
+            if not cands:
+                return None
+            best = None
+            best_score = None
+            for cid, opt, row_count in cands:
+                effective_count = min(row_count, local_remaining.get(cid, 0))
+                if effective_count <= 0:
+                    continue
+                # Order bias dominates: strongly prefer the earliest-order config
+                # so it is exhausted before any later config is placed. Among the
+                # same config, prefer fuller rows and better balance.
+                order_bonus = (10_000 - order_index.get(cid, 0)) * 100_000.0
+                units_side = sum(side.counts.values())
+                units_other = sum(other_side.counts.values())
+                imbalance_after = abs((units_side + effective_count) - units_other)
+                score = order_bonus + (effective_count * 1000.0) + (opt.base_side * 500.0) - (1200.0 * imbalance_after)
+                if best_score is None or score > best_score:
+                    best_score = score
+                    best = (cid, opt, effective_count, score)
+            return best
+
+        while True:
+            top_best = choose_best_candidate(top, bottom)
+            bottom_best = choose_best_candidate(bottom, top)
+            if top_best is None and bottom_best is None:
+                break
+            if top_best is not None and bottom_best is not None:
+                units_top = sum(top.counts.values())
+                units_bottom = sum(bottom.counts.values())
+                diff_if_top = abs((units_top + top_best[2]) - units_bottom)
+                diff_if_bottom = abs(units_top - (units_bottom + bottom_best[2]))
+                if diff_if_top < diff_if_bottom:
+                    chosen_side = 'top'
+                elif diff_if_bottom < diff_if_top:
+                    chosen_side = 'bottom'
+                else:
+                    if units_top < units_bottom:
+                        chosen_side = 'top'
+                    elif units_bottom < units_top:
+                        chosen_side = 'bottom'
+                    else:
+                        chosen_side = 'top' if top_best[3] >= bottom_best[3] else 'bottom'
+            elif top_best is not None:
+                chosen_side = 'top'
+            else:
+                chosen_side = 'bottom'
+            chosen = top_best if chosen_side == 'top' else bottom_best
+            cid, opt, row_count, _ = chosen
+            row_count = min(row_count, local_remaining[cid])
+            if row_count <= 0:
+                break
+            if chosen_side == 'top':
+                top.rows.append((cid, opt, row_count))
+                top.depth_left -= opt.effective_depth
+                top.counts[cid] += row_count
+            else:
+                bottom.rows.append((cid, opt, row_count))
+                bottom.depth_left -= opt.effective_depth
+                bottom.counts[cid] += row_count
+            local_remaining[cid] -= row_count
+
+        units_on_pallet = sum(top.counts.values()) + sum(bottom.counts.values())
+        if units_on_pallet <= 0:
+            return None
+        return self._assemble_pallet_load(pallet, top, bottom, config_map)
 
     def build_single_pallet_candidate(self, pallet: Pallet, remaining: Dict[int, int], config_map: Dict[int, ConfigurationItem], options_by_config: Dict[int, List[OrientationOption]], difficulty: Dict[int, float]) -> Optional[JobPalletLoad]:
         feasible_seed_ids = [cid for cid, qty in remaining.items() if qty > 0 and options_by_config.get(cid)]
@@ -1233,6 +1211,15 @@ class MixedJobOptimizer(BaseOptimizer):
         units_on_pallet = sum(top.counts.values()) + sum(bottom.counts.values())
         if units_on_pallet <= 0:
             return None
+        return self._assemble_pallet_load(pallet, top, bottom, config_map)
+
+    def _assemble_pallet_load(self, pallet: Pallet, top: SideState, bottom: SideState,
+                              config_map: Dict[int, ConfigurationItem]) -> Optional[JobPalletLoad]:
+        """Build the JobPalletLoad (placements, utilization, balance) from filled
+        top/bottom SideStates. Shared by both the free and ordered builders."""
+        units_on_pallet = sum(top.counts.values()) + sum(bottom.counts.values())
+        if units_on_pallet <= 0:
+            return None
         placements: List[Placement] = []
         unit_number = 1
         # Top side: cursor starts at the center beam top edge and moves outward
@@ -1277,23 +1264,120 @@ class MixedJobOptimizer(BaseOptimizer):
         # Favor stable pallets by penalizing top/bottom imbalance (balance_penalty is sum of per-config side diffs).
         return removed_difficulty * 80.0 + used_area + removed_units * 1000.0 - (getattr(load, 'balance_penalty', 0.0) * 2500.0)
 
-    def build_job_plan(self, configs: List[ConfigurationItem]) -> JobPlanResult:
+    def build_job_plan(self, configs: List[ConfigurationItem], preserve_order: bool = False) -> JobPlanResult:
         if not self.pallets:
             return JobPlanResult(False, None, sum(c.qty for c in configs), None, None, [], 'No allowable pallets are currently selected.', None, {}, 0.0)
         config_map = {c.config_id: c for c in configs}
         remaining = {c.config_id: int(c.qty) for c in configs}
         all_feasible = self.all_feasible_options_by_pallet(configs)
         difficulty = self.config_difficulty_scores(configs, all_feasible)
+        # Separate configs that fit no pallet from those that do.  Rather than
+        # aborting the whole job when one window is infeasible, we plan the
+        # feasible configs and report the excluded ones so the user knows
+        # exactly which windows must be handled outside the tool.
+        excluded: List[Tuple[str, str]] = []
+        feasible_configs: List[ConfigurationItem] = []
         for c in configs:
             feasible_any = any(all_feasible[pallet.pallet_id].get(c.config_id) for pallet in self.pallets)
-            if not feasible_any:
-                return JobPlanResult(False, None, sum(c.qty for c in configs), None, None, [], 'At least one configuration fits no selected pallet type under the current rules.', None, {}, 0.0)
+            if feasible_any:
+                feasible_configs.append(c)
+            else:
+                # Build a concise reason by inspecting the largest pallet.
+                widest = max(self.pallets, key=lambda p: p.max_length)
+                long_side = max(c.width, c.height)
+                if long_side > widest.max_length:
+                    reason = (f'long side {long_side:.0f}" exceeds largest pallet length '
+                              f'{widest.max_length:.0f}"')
+                else:
+                    reason = 'fails height or brace rule on all pallets'
+                excluded.append((c.label, reason))
+
+        if not feasible_configs:
+            detail = '; '.join(f'{lbl} ({rsn})' for lbl, rsn in excluded)
+            return JobPlanResult(False, None, sum(c.qty for c in configs), None, None, [],
+                'No configuration fits any selected pallet under the current rules. '
+                f'Excluded: {detail}', None, {}, 0.0, excluded)
+
+        # From here on, only plan the feasible configs.
+        configs = feasible_configs
+        config_map = {c.config_id: c for c in configs}
+        remaining = {c.config_id: int(c.qty) for c in configs}
         pallet_loads: List[JobPalletLoad] = []
         pallet_mix_summary: Dict[str, int] = {}
         total_used_area = 0.0
         total_balance_penalty = 0.0
         total_cost = 0.0
         pallet_number = 1
+
+        if preserve_order:
+            # ── Ordered (by-row) fill with stacking ─────────────────────────
+            # Windows are consumed strictly in configuration-list order: Row 1
+            # is placed first, then Row 2, and so on. Crucially, a later row is
+            # allowed to STACK onto the same pallet as an earlier row when there
+            # is leftover space and the structural rules still pass — Row 2 tops
+            # off Row 1's pallet before a new pallet is opened. A new pallet is
+            # only started when the current in-order frontier cannot add more.
+            #
+            # Implementation: at each step the "eligible" configs are the still-
+            # remaining ones taken in list order starting at the earliest that
+            # still has units. We build a pallet that fills from that ordered
+            # frontier. The candidate builder is order-biased so it always
+            # exhausts the earliest remaining config before pulling from a later
+            # one, which preserves production order while allowing stacking.
+            order_index = {c.config_id: i for i, c in enumerate(configs)}
+            while sum(remaining.values()) > 0:
+                # Ordered frontier: every config that still has units, but the
+                # builder is biased (below) to consume them in list order.
+                frontier = {cid: q for cid, q in remaining.items() if q > 0}
+                best_load = None
+                for pallet in self.pallets:
+                    feasible_frontier = {cid: q for cid, q in frontier.items()
+                                         if all_feasible[pallet.pallet_id].get(cid)}
+                    if not feasible_frontier:
+                        continue
+                    load = self.build_single_pallet_candidate_ordered(
+                        pallet, feasible_frontier, config_map,
+                        all_feasible[pallet.pallet_id], order_index)
+                    if load is None or load.units_on_pallet <= 0:
+                        continue
+                    # Prefer the pallet that removes the most units of the
+                    # earliest-order config, then the most total units, then util.
+                    earliest_cid = min(feasible_frontier, key=lambda c: order_index[c])
+                    earliest_removed = sum(load.config_side_counts.get(earliest_cid, (0, 0)))
+                    key = (earliest_removed, load.units_on_pallet, load.preview_utilization or 0.0, -load.pallet_cost_each)
+                    if best_load is None or key > best_load[0]:
+                        best_load = (key, load)
+                if best_load is None:
+                    break
+                chosen = best_load[1]
+                chosen.pallet_number = pallet_number
+                pallet_loads.append(chosen)
+                pallet_mix_summary[chosen.pallet_id] = pallet_mix_summary.get(chosen.pallet_id, 0) + 1
+                total_balance_penalty += chosen.balance_penalty
+                total_cost += chosen.pallet_cost_each
+                total_used_area += sum(p.length * p.depth for p in chosen.placements)
+                for pcid, (top_count, bottom_count) in chosen.config_side_counts.items():
+                    remaining[pcid] -= (top_count + bottom_count)
+                pallet_number += 1
+            total_units = sum(c.qty for c in configs)
+            total_usable_area = sum(self.usable_area_for_pallet(self.pallet_by_id(load.pallet_id)) for load in pallet_loads)
+            pallets_needed = len(pallet_loads)
+            overall_utilization = (total_used_area / total_usable_area) if total_usable_area else 0.0
+            avg_utilization = (sum(load.preview_utilization for load in pallet_loads) / pallets_needed) if pallets_needed else 0.0
+            explanation = (f'Ordered (by-row) plan: windows were palletized in configuration-list order — '
+                           f'row 1 first, then row 2, and so on — with later rows stacking onto an earlier '
+                           f'row\'s pallet when space and the structural rules allow. Total pallets needed = '
+                           f'{pallets_needed}. Overall utilization = {overall_utilization:.2%}. Average pallet '
+                           f'utilization = {avg_utilization:.2%}. Estimated total pallet cost = ${total_cost:,.2f}. '
+                           f'Each side independently satisfies the non-increasing pyramid support rule.')
+            if excluded:
+                excl_detail = '; '.join(f'{lbl} ({rsn})' for lbl, rsn in excluded)
+                explanation += (f' NOTE: {len(excluded)} configuration(s) were excluded because they '
+                                f'fit no selected pallet and must be handled outside the tool: {excl_detail}.')
+            return JobPlanResult(True, pallets_needed, total_units, overall_utilization, avg_utilization,
+                                 pallet_loads, explanation, total_balance_penalty, pallet_mix_summary, total_cost, excluded)
+
+        # ── Free optimizer (default) ────────────────────────────────────────
         while sum(remaining.values()) > 0:
             candidate_loads: List[Tuple[float, JobPalletLoad]] = []
             for pallet in self.pallets:
@@ -1321,7 +1405,11 @@ class MixedJobOptimizer(BaseOptimizer):
         overall_utilization = (total_used_area / total_usable_area) if total_usable_area else 0.0
         avg_utilization = (sum(load.preview_utilization for load in pallet_loads) / pallets_needed) if pallets_needed else 0.0
         explanation = f'Job plan built pallet-by-pallet using mixed pallet sizes. Total pallets needed = {pallets_needed}. Overall utilization = {overall_utilization:.2%}. Average pallet utilization = {avg_utilization:.2%}. Estimated total pallet cost = ${total_cost:,.2f}. Combined supported base widths from the center outward satisfy the non-increasing pyramid support rule on each pallet. Balance information is warning-only and does not drive pallet selection. By Job objective: fit all windows across the fewest selected pallets possible using the allowable pallet sizes.'
-        return JobPlanResult(True, pallets_needed, total_units, overall_utilization, avg_utilization, pallet_loads, explanation, total_balance_penalty, pallet_mix_summary, total_cost)
+        if excluded:
+            excl_detail = '; '.join(f'{lbl} ({rsn})' for lbl, rsn in excluded)
+            explanation += (f' NOTE: {len(excluded)} configuration(s) were excluded because they '
+                            f'fit no selected pallet and must be handled outside the tool: {excl_detail}.')
+        return JobPlanResult(True, pallets_needed, total_units, overall_utilization, avg_utilization, pallet_loads, explanation, total_balance_penalty, pallet_mix_summary, total_cost, excluded)
 
     def evaluate_job(self, configs: List[ConfigurationItem]) -> JobPlanResult:
         return self.build_job_plan(configs)
@@ -1334,6 +1422,68 @@ def get_config_color(config_id: int) -> str:
     return palette[(config_id - 1) % len(palette)]
 
 
+def _pallet_png_bytes(
+    pallet: Pallet,
+    placements: List[Placement],
+    title: str,
+    width: int = 900,
+    height: int = 500,
+) -> bytes:
+    """Render a pallet bottom-view layout to PNG bytes using matplotlib.
+
+    This is a browser-free replacement for the kaleido/Plotly image path,
+    so PDF generation works on headless servers (e.g. Streamlit Cloud)
+    without Chrome/Edge/Chromium installed. It mirrors build_plotly_preview.
+    """
+    import matplotlib
+    matplotlib.use('Agg')  # headless backend, no display/browser required
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+
+    dpi = 100
+    fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
+
+    # Pallet outline
+    ax.add_patch(Rectangle((0, 0), pallet.base_length, pallet.base_width,
+                           fill=False, edgecolor='black', linewidth=2.5))
+    # Bottom side band (usable)
+    ax.add_patch(Rectangle((0, 0), pallet.base_length, pallet.max_depth_per_side,
+                           facecolor='#ffc18c', alpha=0.18, edgecolor='none'))
+    # Center frame
+    ax.add_patch(Rectangle((0, pallet.max_depth_per_side), pallet.base_length, pallet.center_depth,
+                           facecolor='#a0a0a0', alpha=0.65, edgecolor='black', linewidth=1.5))
+    # Top side band (usable)
+    top_y = pallet.max_depth_per_side + pallet.center_depth
+    ax.add_patch(Rectangle((0, top_y), pallet.base_length, pallet.base_width - top_y,
+                           facecolor='#ffc18c', alpha=0.18, edgecolor='none'))
+    ax.text(pallet.base_length / 2, pallet.max_depth_per_side + pallet.center_depth / 2,
+            'Center Frame', ha='center', va='center', fontsize=11, color='black')
+
+    # Placed units
+    for p in placements:
+        ax.add_patch(Rectangle((p.x, p.y), p.length, p.depth,
+                               fill=False, edgecolor=get_config_color(p.config_id), linewidth=1.8))
+        ax.text(p.x + p.length / 2, p.y + p.depth / 2,
+                f'{p.config_label}\n{p.orientation}',
+                ha='center', va='center', fontsize=7, color=(0, 0, 0, 0.75))
+
+    ax.set_xlim(0, pallet.base_length)
+    ax.set_ylim(0, pallet.base_width)
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlabel('Pallet Length (inches)')
+    ax.set_ylabel('Pallet Width / Side Depth (inches)')
+    ax.set_title(title)
+    ax.grid(True, color='#e6e6e6', linewidth=0.6)
+    ax.set_axisbelow(True)
+    fig.tight_layout()
+
+    out = io.BytesIO()
+    fig.savefig(out, format='png', dpi=dpi)
+    plt.close(fig)
+    out.seek(0)
+    return out.getvalue()
+
+
 
 def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str) -> go.Figure:
     fig = go.Figure()
@@ -1341,7 +1491,7 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
     fig.add_shape(type='rect', x0=0, y0=0, x1=pallet.base_length, y1=pallet.max_depth_per_side, line=dict(color='rgba(0,0,0,0)'), fillcolor='rgba(255,193,140,0.18)')
     fig.add_shape(type='rect', x0=0, y0=pallet.max_depth_per_side, x1=pallet.base_length, y1=pallet.max_depth_per_side + pallet.center_depth, line=dict(color='black', width=2), fillcolor='rgba(160,160,160,0.65)')
     fig.add_shape(type='rect', x0=0, y0=pallet.max_depth_per_side + pallet.center_depth, x1=pallet.base_length, y1=pallet.base_width, line=dict(color='rgba(0,0,0,0)'), fillcolor='rgba(255,193,140,0.18)')
-    fig.add_annotation(x=pallet.base_length / 2, y=pallet.max_depth_per_side + pallet.center_depth / 2, text='Center Frame', showarrow=False, font=dict(size=13, color='black'))
+    fig.add_annotation(x=pallet.base_length / 2, y=pallet.max_depth_per_side + pallet.center_depth / 2, text='Center Frame', showarrow=False, font=dict(size=20, color='black'))
     for p in placements:
         cx, cy = p.x + p.length / 2, p.y + p.depth / 2
         fig.add_shape(type='rect', x0=p.x, y0=p.y, x1=p.x + p.length, y1=p.y + p.depth,
@@ -1366,8 +1516,9 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
             y=[cy],
             text=[f"{p.config_label}<br>{p.orientation}"],
             mode='text',
+        
             textfont=dict(
-                size=9,  # bump slightly for two lines
+                size=18,  # bump slightly for two lines
                 color='rgba(0,0,0,0.7)'
             ),
             textposition='middle center',
@@ -1384,7 +1535,7 @@ def clean_string_values(series: pd.Series) -> List[str]:
 
 
 def build_default_job_items(lookup: ProductDepthLookup) -> List[dict]:
-    seeds = [('Cfg 1', 'AA4325', 'PI', 1, 33.438, 18.0, 28), ('Cfg 2', 'AA4325', 'PI', 1, 35.563, 18.0, 12), ('Cfg 3', 'AA4325', 'PI', 1, 37.625, 18.0, 8)]
+    seeds = [('Cfg 1', 'AA4325', 'PI', 1, 33.438, 18.0, 28)]
     out = []
     for label, fam, typ, depth_option, width, height, qty in seeds:
         d = lookup.get_default_depth(fam, typ, depth_option)
@@ -1451,14 +1602,15 @@ def configs_to_rows(configs: List[ConfigurationItem]) -> Tuple[Tuple, ...]:
 
 
 @st.cache_data(show_spinner=False)
-def run_job_plan_cached(config: dict, depth_csv_path: str, allowed: Tuple[str, ...], config_rows: Tuple[Tuple, ...]) -> JobPlanResult:
+def run_job_plan_cached(config: dict, depth_csv_path: str, allowed: Tuple[str, ...], config_rows: Tuple[Tuple, ...], preserve_order: bool = False) -> JobPlanResult:
     """Cache the mixed-job optimization so it only recomputes when an input
     that affects the plan actually changes (pallet config contents, allowed
-    pallet list, or the configuration rows) — not on every widget interaction."""
+    pallet list, the configuration rows, or the ordered/optimized toggle) —
+    not on every widget interaction."""
     depth_df = load_depths(depth_csv_path)
     optimizer = MixedJobOptimizer(config, depth_df, allowed_pallet_ids=list(allowed))
     configs = [ConfigurationItem(*row) for row in config_rows]
-    return optimizer.build_job_plan(configs)
+    return optimizer.build_job_plan(configs, preserve_order=preserve_order)
 
 
 def balance_table_for_load(load: JobPalletLoad, configs: List[ConfigurationItem]) -> pd.DataFrame:
@@ -1665,7 +1817,7 @@ def main():
                                 st.session_state['pdf_cfg_bytes_v45'] = export_pdf_by_configuration(job, best, results, allowable_pallets, optimizer, job_name=job_name)
                                 st.session_state['pdf_cfg_sig_v45'] = cfg_pdf_sig
                         except Exception as exc:
-                            st.error(f'Could not render the PDF report: {exc}. The PDF needs the image renderer (kaleido + a Chrome/Edge browser); the Excel export above always works.')
+                            st.error(f'Could not render the PDF report: {exc}. The Excel export above always works regardless.')
                     if st.session_state.get('pdf_cfg_sig_v45') == cfg_pdf_sig and 'pdf_cfg_bytes_v45' in st.session_state:
                         safe_name = ''.join(ch for ch in job_name.strip() if ch.isalnum() or ch in (' ', '-', '_')).strip().replace(' ', '_')
                         pdf_filename = f'{safe_name}_pallet_report.pdf' if safe_name else 'pallet_report_by_configuration.pdf'
@@ -1694,9 +1846,8 @@ def main():
         if optimizer.pallets_missing_cost:
             st.sidebar.warning(f"No pallet_cost set in the config JSON for: {', '.join(optimizer.pallets_missing_cost)}. Costs will show as $0.00. Add a \"pallet_cost\" value to each pallet entry in pallet_config_seeded.json.")
 
-        # ── Job setup: naming / save / load (top of main UI) ─────────────────
         st.subheader('Mixed Configuration Job Setup')
-        setup_c1, setup_c2, setup_c3 = st.columns([1.2, 0.8, 1.4])
+        setup_c1, setup_c2, setup_c3, setup_c4 = st.columns([1.2, 0.8, 1.4, 0.8])
         with setup_c1:
             job_name = st.text_input('Job Name', value=st.session_state.get('job_name_v45', ''), help='Optional. Appears on the PDF report title and summary.')
             st.session_state['job_name_v45'] = job_name
@@ -1719,6 +1870,13 @@ def main():
         with setup_c3:
             uploaded_job = st.file_uploader('Load Job (.json)', type=['json'], key='job_loader_v45',
                                             help='Restores a previously saved job, replacing the current configuration list.')
+        with setup_c4:
+            st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
+            if st.button('Reset', use_container_width=True,
+                         disabled=not bool(st.session_state['job_items_v37']),
+                         help='Clears every configuration currently loaded into the Pallet Optimizer.'):
+                st.session_state['confirm_reset_v46'] = True
+                st.rerun()
         if uploaded_job is not None:
             load_sig = (uploaded_job.name, uploaded_job.size)
             if st.session_state.get('job_loaded_sig_v45') != load_sig:
@@ -1746,13 +1904,33 @@ def main():
                     st.error(f'Could not load job file: {exc}')
                     st.session_state['job_loaded_sig_v45'] = load_sig
 
+        # ── Reset confirmation (triggered by the Reset button next to Load Job) ──
+        if st.session_state.get('confirm_reset_v46', False):
+            _reset_items = st.session_state['job_items_v37']
+            st.warning(
+                f'This will clear all {len(_reset_items)} configuration(s) loaded into the Pallet Optimizer. '
+                'This cannot be undone. Use Save Job (.json) first if you want to keep this job.'
+            )
+            reset_c1, reset_c2, _reset_spacer = st.columns([1, 1, 3])
+            if reset_c1.button('Yes, clear all', type='primary', use_container_width=True):
+                st.session_state['job_items_v37'] = []
+                st.session_state['selected_job_row_v37'] = 1
+                st.session_state['confirm_reset_v46'] = False
+                for k in list(st.session_state.keys()):
+                    if str(k).startswith('pdf_job_'):
+                        del st.session_state[k]
+                st.success('All configurations cleared.')
+                st.rerun()
+            if reset_c2.button('Cancel', use_container_width=True):
+                st.session_state['confirm_reset_v46'] = False
+                st.rerun()
+
         items = st.session_state['job_items_v37']
         if items and st.session_state['selected_job_row_v37'] > len(items):
             st.session_state['selected_job_row_v37'] = len(items)
         if not items:
             st.session_state['selected_job_row_v37'] = 1
 
-        # ── Add / Edit configuration (user input, top of main UI) ───────────
         st.subheader('Add / Edit Configuration')
         ensure_job_form_defaults(lookup)
         current_sig = (str(st.session_state.get('jf_family', '')).strip(), str(st.session_state.get('jf_type', '')).strip(), int(st.session_state.get('jf_depth_option', 1)))
@@ -1809,7 +1987,6 @@ def main():
                     load_form_from_item(st.session_state['job_items_v37'][st.session_state['selected_job_row_v37'] - 1])
             st.rerun()
 
-        # ── Configuration list (below the user input) ────────────────────────
         st.subheader('Configuration List')
         st.dataframe(build_job_items_df(items), use_container_width=True, hide_index=True)
         if items:
@@ -1821,8 +1998,17 @@ def main():
         else:
             st.info('No configurations are currently in the job. Use the form above to add one.')
 
+        preserve_order = st.checkbox(
+            'Palletize in row order',
+            value=st.session_state.get('preserve_order_v48', False),
+            key='preserve_order_v48',
+            help='When checked, windows are loaded onto pallets strictly in the order of the configuration list. '
+                 'Each row\'s full quantity is palletized before the next row begins, and each pallet holds a single '
+                 'configuration. When unchecked, the optimizer freely mixes configurations to minimize pallet count.'
+        )
+
         configs = items_to_configs(st.session_state['job_items_v37'])
-        best_job = run_job_plan_cached(config, str(DEFAULT_DEPTH_CSV_PATH), tuple(sorted(allowable_pallets)), configs_to_rows(configs)) if configs else None
+        best_job = run_job_plan_cached(config, str(DEFAULT_DEPTH_CSV_PATH), tuple(sorted(allowable_pallets)), configs_to_rows(configs), preserve_order) if configs else None
 
         st.markdown('---')
         job_tab1, job_tab2, job_tab3 = st.tabs(['Overview', 'Preview', 'Job Details'])
@@ -1847,14 +2033,18 @@ def main():
                 c2.metric('Pallet Types Used', len(best_job.pallet_mix_summary))
                 c3.metric('Balance Warning Total', f'{(best_job.total_balance_penalty or 0.0):.1f}')
                 st.success('A mixed-pallet job plan was found under the selected pallet list and the corrected pyramid support rule.')
+                if best_job.excluded_configs:
+                    excl_lines = '\n'.join(f'- **{lbl}** — {rsn}' for lbl, rsn in best_job.excluded_configs)
+                    st.warning(
+                        f'{len(best_job.excluded_configs)} configuration(s) could not be placed on any '
+                        f'selected pallet and were excluded from this plan. Handle these outside the tool:\n\n'
+                        + excl_lines
+                    )
                 st.markdown(f'**Explanation:** {best_job.explanation}')
                 st.dataframe(pallet_mix_table(best_job.pallet_mix_summary, optimizer), use_container_width=True, hide_index=True)
                 dl_col1, dl_col2 = st.columns(2)
                 dl_col1.download_button('Export Summary (.xlsx)', data=export_by_job(configs, best_job, allowable_pallets), file_name='pallet_summary_by_job.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-                # PDF is expensive (kaleido renders every pallet image).
-                # Only generate when explicitly requested. A single fixed
-                # session key holds the latest PDF (with a signature of the
-                # inputs) so old reports don't pile up in session memory.
+
                 job_pdf_sig = (best_job.pallets_needed, best_job.total_units, best_job.estimated_total_cost, job_name)
                 if dl_col2.button('Generate PDF Report', key='gen_pdf_job'):
                     try:
@@ -1862,7 +2052,7 @@ def main():
                             st.session_state['pdf_job_bytes_v45'] = export_pdf_by_job(configs, best_job, allowable_pallets, optimizer, job_name=job_name)
                             st.session_state['pdf_job_sig_v45'] = job_pdf_sig
                     except Exception as exc:
-                        st.error(f'Could not render the PDF report: {exc}. The PDF needs the image renderer (kaleido + a Chrome/Edge browser); the Excel export above always works.')
+                        st.error(f'Could not render the PDF report: {exc}. The Excel export above always works regardless.')
                 if st.session_state.get('pdf_job_sig_v45') == job_pdf_sig and 'pdf_job_bytes_v45' in st.session_state:
                     safe_name = ''.join(ch for ch in job_name.strip() if ch.isalnum() or ch in (' ', '-', '_')).strip().replace(' ', '_')
                     pdf_filename = f'{safe_name}_pallet_report.pdf' if safe_name else 'pallet_report_by_job.pdf'
