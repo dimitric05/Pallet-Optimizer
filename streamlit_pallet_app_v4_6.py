@@ -957,7 +957,7 @@ class MixedJobOptimizer(BaseOptimizer):
         )
 
 
-    def candidate_rows_for_side(self, side, other_side, remaining, options_by_config, pallet):
+    def candidate_rows_for_side(self, side, other_side, remaining, options_by_config, pallet, allow_singletons: bool = False):
         candidates = []
     
         
@@ -1006,8 +1006,10 @@ class MixedJobOptimizer(BaseOptimizer):
     
                 # --- Strong skinny-row guard:
                 # If the slot can take 2 and SOMEONE can supply 2, forbid 1-wide rows here.
+                # In ordered (by-row) mode this guard is relaxed: production order
+                # forces odd leftovers to be placed even as singletons.
                 min_count = 1
-                if side.rows and row_slot_max >= 2 and any_source_has_two(opt):
+                if not allow_singletons and side.rows and row_slot_max >= 2 and any_source_has_two(opt):
                     min_count = 2
     
                 if max_count < min_count:
@@ -1030,50 +1032,63 @@ class MixedJobOptimizer(BaseOptimizer):
                                               options_by_config: Dict[int, List[OrientationOption]],
                                               order_index: Dict[int, int]) -> Optional[JobPalletLoad]:
         """
-        Ordered variant of build_single_pallet_candidate.
+        Strict-order variant of build_single_pallet_candidate.
 
-        Fills a pallet respecting configuration-list order: the earliest
-        remaining config (lowest order_index) is placed first and fully before
-        a later config is pulled onto the same pallet. Later configs stack onto
-        leftover space when the per-side taper rule still passes. This is what
-        lets Row 2 top off Row 1's pallet instead of always opening a new one.
+        Only the CURRENT earliest remaining config (by list order) may be
+        placed at each step. When it is exhausted, the next config in order
+        becomes current and may stack onto the same pallet's leftover space.
+        If the current config fits neither side (taper/depth block it), the
+        pallet is closed — the builder never skips ahead to a later config,
+        so production order is never violated. The pallet's two sides carry
+        independent tapers, so a next row wider than side A's outermost can
+        still legitimately seed or continue side B.
         """
-        feasible_ids = [cid for cid, qty in remaining.items() if qty > 0 and options_by_config.get(cid)]
-        if not feasible_ids:
-            return None
-        # Seed with the earliest-order config (not difficulty).
-        seed_id = min(feasible_ids, key=lambda cid: order_index.get(cid, 10**9))
         top = SideState('top', pallet.max_depth_per_side, {cid: 0 for cid in remaining}, [])
         bottom = SideState('bottom', pallet.max_depth_per_side, {cid: 0 for cid in remaining}, [])
         local_remaining = dict(remaining)
 
-        def choose_best_candidate(side: SideState, other_side: SideState) -> Optional[Tuple[int, OrientationOption, int, float]]:
-            cands = self.candidate_rows_for_side(side, other_side, local_remaining, options_by_config, pallet)
-            if not cands:
+        def current_earliest() -> Optional[int]:
+            # Earliest is judged against ALL remaining configs in global order.
+            # If the globally-next config cannot go on THIS pallet type, the
+            # pallet must close rather than skip ahead to a later config —
+            # otherwise production order would be violated across pallets.
+            elig = [cid for cid, q in local_remaining.items() if q > 0]
+            if not elig:
                 return None
+            g = min(elig, key=lambda cid: order_index.get(cid, 10**9))
+            if not options_by_config.get(g):
+                return None  # next-in-order config infeasible here -> close pallet
+            return g
+
+        def best_for_side(side: SideState, other_side: SideState, only_cid: int):
+            cands = self.candidate_rows_for_side(side, other_side, local_remaining,
+                                                 options_by_config, pallet, allow_singletons=True)
             best = None
             best_score = None
             for cid, opt, row_count in cands:
+                if cid != only_cid:
+                    continue
                 effective_count = min(row_count, local_remaining.get(cid, 0))
                 if effective_count <= 0:
                     continue
-                # Order bias dominates: strongly prefer the earliest-order config
-                # so it is exhausted before any later config is placed. Among the
-                # same config, prefer fuller rows and better balance.
-                order_bonus = (10_000 - order_index.get(cid, 0)) * 100_000.0
                 units_side = sum(side.counts.values())
                 units_other = sum(other_side.counts.values())
                 imbalance_after = abs((units_side + effective_count) - units_other)
-                score = order_bonus + (effective_count * 1000.0) + (opt.base_side * 500.0) - (1200.0 * imbalance_after)
+                score = (effective_count * 1000.0) + (opt.base_side * 500.0) - (1200.0 * imbalance_after)
                 if best_score is None or score > best_score:
                     best_score = score
                     best = (cid, opt, effective_count, score)
             return best
 
         while True:
-            top_best = choose_best_candidate(top, bottom)
-            bottom_best = choose_best_candidate(bottom, top)
+            cid_now = current_earliest()
+            if cid_now is None:
+                break
+            top_best = best_for_side(top, bottom, cid_now)
+            bottom_best = best_for_side(bottom, top, cid_now)
             if top_best is None and bottom_best is None:
+                # Current config fits neither side of this pallet — close it.
+                # Never skip ahead to a later config.
                 break
             if top_best is not None and bottom_best is not None:
                 units_top = sum(top.counts.values())
@@ -1326,24 +1341,23 @@ class MixedJobOptimizer(BaseOptimizer):
             # one, which preserves production order while allowing stacking.
             order_index = {c.config_id: i for i, c in enumerate(configs)}
             while sum(remaining.values()) > 0:
-                # Ordered frontier: every config that still has units, but the
-                # builder is biased (below) to consume them in list order.
+                # Ordered frontier: every config that still has units. The builder
+                # only ever places the current earliest, advancing in order.
                 frontier = {cid: q for cid, q in remaining.items() if q > 0}
+                global_earliest = min(frontier, key=lambda c: order_index[c])
                 best_load = None
                 for pallet in self.pallets:
-                    feasible_frontier = {cid: q for cid, q in frontier.items()
-                                         if all_feasible[pallet.pallet_id].get(cid)}
-                    if not feasible_frontier:
+                    # A pallet type that cannot hold the global earliest config
+                    # cannot be opened this round — doing so would palletize a
+                    # later row before an earlier one (order violation).
+                    if not all_feasible[pallet.pallet_id].get(global_earliest):
                         continue
                     load = self.build_single_pallet_candidate_ordered(
-                        pallet, feasible_frontier, config_map,
+                        pallet, frontier, config_map,
                         all_feasible[pallet.pallet_id], order_index)
                     if load is None or load.units_on_pallet <= 0:
                         continue
-                    # Prefer the pallet that removes the most units of the
-                    # earliest-order config, then the most total units, then util.
-                    earliest_cid = min(feasible_frontier, key=lambda c: order_index[c])
-                    earliest_removed = sum(load.config_side_counts.get(earliest_cid, (0, 0)))
+                    earliest_removed = sum(load.config_side_counts.get(global_earliest, (0, 0)))
                     key = (earliest_removed, load.units_on_pallet, load.preview_utilization or 0.0, -load.pallet_cost_each)
                     if best_load is None or key > best_load[0]:
                         best_load = (key, load)
