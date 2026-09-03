@@ -533,7 +533,7 @@ def _packaging_requirements_flowables() -> list:
     styles = getSampleStyleSheet()
     body = ParagraphStyle('req', parent=styles['Normal'], fontSize=9, leading=12)
     return [
-        _heading('Packaging Requirements (A-Buck)', level=2),
+        _heading('Packaging Requirements', level=2),
         Paragraph(f'&bull; {HEIGHT_RULE_TEXT}', body),
         Paragraph(f'&bull; {BANDING_RULE_TEXT}', body),
         Paragraph(f'&bull; <b>Tether note:</b> {TETHER_NOTE_TEXT}', body),
@@ -645,7 +645,7 @@ def export_pdf_by_configuration(
     # --- Pallet layout images ---
     chosen_pallet = optimizer.pallet_by_id(best.pallet_id)
     pallet_count = best.pallets_needed or 1
-    story.append(_heading('Pallet Layout Previews', level=1))
+    story.append(_heading('Pallet Layout Previews (Top View)', level=1))
     story.append(Spacer(1, 0.1 * inch))
     for pallet_num in range(1, pallet_count + 1):
         units_on = optimizer.units_for_pallet_sequence(job.qty, best.max_units_per_pallet or 1, pallet_num)
