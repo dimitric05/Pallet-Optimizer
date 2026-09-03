@@ -49,7 +49,8 @@ GUIDELINE_CENTER_WALL_HEIGHT_IN = 56.0   # A-Buck support wall height
 GUIDELINE_HEIGHT_ALLOWANCE_IN   = 18.0   # content may extend this far above the wall (74" total)
 MAX_UPRIGHT_HEIGHT_IN           = 70.0   # HARD CAP applied by this tool, held below the 74" guideline
 
-BAND_COLOR = '#2e8b57'
+BAND_ALPHA = .45
+BAND_COLOR_RGBA = f'rgba(46,139,87,{BAND_ALPHA})'
 
 BANDING_RULE_TEXT = (
     'Vertical banding: at least 2 vertical bands on every package. Packages 72" to 96" long '
@@ -61,9 +62,7 @@ TETHER_NOTE_TEXT = (
     'outer bands are removed.'
 )
 HEIGHT_RULE_TEXT = (
-    f'Upright height: content is limited to {MAX_UPRIGHT_HEIGHT_IN:.0f}" (guideline allows '
-    f'{GUIDELINE_HEIGHT_ALLOWANCE_IN:.0f}" above the {GUIDELINE_CENTER_WALL_HEIGHT_IN:.0f}" '
-    f'center wall; this tool holds a {MAX_UPRIGHT_HEIGHT_IN:.0f}" cap).'
+    f'Upright height: content is limited to {MAX_UPRIGHT_HEIGHT_IN:.0f}".'
 )
 
 
@@ -661,7 +660,7 @@ def export_pdf_by_configuration(
     # --- Pallet layout images ---
     chosen_pallet = optimizer.pallet_by_id(best.pallet_id)
     pallet_count = best.pallets_needed or 1
-    story.append(_heading('Pallet Layout Previews', level=1))
+    story.append(_heading('Pallet Layout Previews (Top View)', level=1))
     story.append(Spacer(1, 0.1 * inch))
     for pallet_num in range(1, pallet_count + 1):
         units_on = optimizer.units_for_pallet_sequence(job.qty, best.max_units_per_pallet or 1, pallet_num)
@@ -1574,14 +1573,14 @@ def _pallet_png_bytes(
                            fill=False, edgecolor='black', linewidth=2.5))
     # Bottom side band (usable)
     ax.add_patch(Rectangle((0, 0), pallet.base_length, pallet.max_depth_per_side,
-                           facecolor='#ffc18c', alpha=0.18, edgecolor='none'))
+                           facecolor='#ffc18c', alpha={BAND_ALPHA}, edgecolor='none'))
     # Center frame
     ax.add_patch(Rectangle((0, pallet.max_depth_per_side), pallet.base_length, pallet.center_depth,
                            facecolor='#a0a0a0', alpha=0.65, edgecolor='black', linewidth=1.5))
     # Top side band (usable)
     top_y = pallet.max_depth_per_side + pallet.center_depth
     ax.add_patch(Rectangle((0, top_y), pallet.base_length, pallet.base_width - top_y,
-                           facecolor='#ffc18c', alpha=0.18, edgecolor='none'))
+                           facecolor='#ffc18c', alpha={BAND_ALPHA}, edgecolor='none'))
     ax.text(pallet.base_length / 2, pallet.max_depth_per_side + pallet.center_depth / 2,
             'Center Frame', ha='center', va='center', fontsize=11, color='black')
 
@@ -1670,16 +1669,6 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
     fig.update_layout(title=f'{title} — {band_count} vertical bands required', height=560, margin=dict(l=20, r=20, t=60, b=20), plot_bgcolor='white', hovermode='closest')
     return fig
 
-
-def render_packaging_notes(pallet: Pallet) -> None:
-    """Banding count + tether reminder shown under the interactive preview."""
-    bands = required_vertical_bands(pallet.base_length)
-    st.info(
-        f'**Banding:** {bands} vertical bands required for the {pallet.base_length:.0f}" package '
-        f'(green lines). {BANDING_RULE_TEXT}\n\n'
-        f'**Tether:** {TETHER_NOTE_TEXT}\n\n'
-        f'**Height:** {HEIGHT_RULE_TEXT}'
-    )
 
 def clean_string_values(series: pd.Series) -> List[str]:
     return sorted(series.astype('string').dropna().unique().tolist())
