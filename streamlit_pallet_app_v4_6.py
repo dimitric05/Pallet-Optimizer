@@ -1630,7 +1630,7 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
             mode='text',
         
             textfont=dict(
-                size=18,  # bump slightly for two lines
+                size=14,  # bump slightly for two lines
                 color='rgba(0,0,0,0.7)'
             ),
             textposition='middle center',
