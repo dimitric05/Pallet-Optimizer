@@ -49,7 +49,7 @@ GUIDELINE_CENTER_WALL_HEIGHT_IN = 56.0   # A-Buck support wall height
 GUIDELINE_HEIGHT_ALLOWANCE_IN   = 18.0   # content may extend this far above the wall (74" total)
 MAX_UPRIGHT_HEIGHT_IN           = 70.0   # HARD CAP applied by this tool, held below the 74" guideline
 
-BAND_COLOR = '#2e8b57'   # green, matching the band lines on the guideline drawing
+BAND_COLOR = (46/255, 139/255, 87/255, 0.30)
 
 BANDING_RULE_TEXT = (
     'Vertical banding: at least 2 vertical bands on every package. Packages 72" to 96" long '
@@ -1890,7 +1890,7 @@ def main():
 
     mode = st.sidebar.radio('Mode', ['By Configuration', 'By Job', 'Pallet Settings'], index=0)
     if mode != 'Pallet Settings':
-        st.sidebar.caption(f'Upright height hard cap: {MAX_UPRIGHT_HEIGHT_IN:.0f}" (A-Buck guideline). Applied regardless of per-pallet Max Height.')
+        st.sidebar.caption(f'Upright height hard cap: {MAX_UPRIGHT_HEIGHT_IN:.0f}"')
         allowable_pallets = st.sidebar.multiselect('Allowable Pallets', options=all_pallet_ids, default=all_pallet_ids, help='Select the pallet sizes the optimizer is allowed to use in the current mode.')
 
     if mode == 'Pallet Settings':
