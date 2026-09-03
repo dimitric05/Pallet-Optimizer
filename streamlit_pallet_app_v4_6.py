@@ -49,7 +49,9 @@ GUIDELINE_CENTER_WALL_HEIGHT_IN = 56.0   # A-Buck support wall height
 GUIDELINE_HEIGHT_ALLOWANCE_IN   = 18.0   # content may extend this far above the wall (74" total)
 MAX_UPRIGHT_HEIGHT_IN           = 70.0   # HARD CAP applied by this tool, held below the 74" guideline
 
-BAND_COLOR = '#2e8b57'
+BAND_COLOR = '#2e8b57'   # green, matching the band lines on the guideline drawing
+BAND_ALPHA = 0.45        # 0 = invisible, 1 = solid; applies to both the PDF images and the interactive preview
+BAND_COLOR_RGBA = f'rgba(46,139,87,{BAND_ALPHA})'
 
 BANDING_RULE_TEXT = (
     'Vertical banding: at least 2 vertical bands on every package. Packages 72" to 96" long '
@@ -121,10 +123,10 @@ class Pallet:
     center_height: float
     center_depth: float
     max_depth_per_side: float
-    max_height: float
     max_length: float
     usable_space_per_side: float
     pallet_cost: float = 0.0
+    max_height: float = MAX_UPRIGHT_HEIGHT_IN   # legacy field kept so older config files still load; the global hard cap is what is enforced
 
 
 @dataclass
@@ -243,7 +245,6 @@ DEFAULT_PALLET_CONFIG_JSON = '''{
       "center_height": 48.0,
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
-      "max_height": 84.0,
       "max_length": 58.0,
       "usable_space_per_side": 1218.0,
       "pallet_cost": 135.0
@@ -255,7 +256,6 @@ DEFAULT_PALLET_CONFIG_JSON = '''{
       "center_height": 48.0,
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
-      "max_height": 84.0,
       "max_length": 70.0,
       "usable_space_per_side": 1470.0,
       "pallet_cost": 144.8
@@ -267,7 +267,6 @@ DEFAULT_PALLET_CONFIG_JSON = '''{
       "center_height": 48.0,
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
-      "max_height": 84.0,
       "max_length": 94.0,
       "usable_space_per_side": 1974.0,
       "pallet_cost": 163.2
@@ -279,7 +278,6 @@ DEFAULT_PALLET_CONFIG_JSON = '''{
       "center_height": 48.0,
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
-      "max_height": 84.0,
       "max_length": 106.0,
       "usable_space_per_side": 2226.0,
       "pallet_cost": 178.2
@@ -291,7 +289,6 @@ DEFAULT_PALLET_CONFIG_JSON = '''{
       "center_height": 48.0,
       "center_depth": 4.0,
       "max_depth_per_side": 21.0,
-      "max_height": 84.0,
       "max_length": 118.0,
       "usable_space_per_side": 2478.0,
       "pallet_cost": 182.1
@@ -544,19 +541,6 @@ def _packaging_requirements_flowables() -> list:
     ]
 
 
-def _pallet_page_note(pallet: Pallet) -> Paragraph:
-    """Per-pallet banding + tether reminder placed under each layout image."""
-    styles = getSampleStyleSheet()
-    body = ParagraphStyle('note', parent=styles['Normal'], fontSize=8.5, leading=11)
-    bands = required_vertical_bands(pallet.base_length)
-    return Paragraph(
-        f'<b>Banding:</b> {bands} vertical bands required for this {pallet.base_length:.0f}" package '
-        f'(green lines in the layout show band locations). '
-        f'<b>Tether:</b> {TETHER_NOTE_TEXT}',
-        body,
-    )
-
-
 def _assembly_drawing_flowables() -> list:
     """Closing page: A-Buck pallet assembly drawing (Veritiv dwg 9646-001) embedded in the app."""
     styles = getSampleStyleSheet()
@@ -674,8 +658,6 @@ def export_pdf_by_configuration(
         img_buf = io.BytesIO(img_bytes)
         rl_img = RLImage(img_buf, width=9 * inch, height=5 * inch)
         story.append(rl_img)
-        story.append(Spacer(1, 0.05 * inch))
-        story.append(_pallet_page_note(chosen_pallet))
         if pallet_num < pallet_count:
             story.append(PageBreak())
 
@@ -787,8 +769,6 @@ def export_pdf_by_job(
         img_buf = io.BytesIO(img_bytes)
         rl_img = RLImage(img_buf, width=9 * inch, height=5 * inch)
         story.append(rl_img)
-        story.append(Spacer(1, 0.05 * inch))
-        story.append(_pallet_page_note(chosen_pallet))
         if load.pallet_number < len(result.pallet_loads):
             story.append(PageBreak())
 
@@ -960,7 +940,7 @@ class SingleConfigOptimizer(BaseOptimizer):
             if base_side > pallet.max_length:
                 reasons.append(f'{orientation_name}: base side {base_side:.3f} exceeds max length {pallet.max_length:.3f}')
                 continue
-            height_limit = min(pallet.max_height, MAX_UPRIGHT_HEIGHT_IN)
+            height_limit = MAX_UPRIGHT_HEIGHT_IN
             if upright_height > height_limit:
                 reasons.append(f'{orientation_name}: upright height {upright_height:.3f} exceeds height limit {height_limit:.3f} (hard cap {MAX_UPRIGHT_HEIGHT_IN:.0f}")')
                 continue
@@ -1021,7 +1001,7 @@ class MixedJobOptimizer(BaseOptimizer):
                 for orientation_name, base_side, upright_height in self.get_orientations(c.product_type, long_side, short_side, c.side_down):
                     if base_side > pallet.max_length:
                         continue
-                    if upright_height > min(pallet.max_height, MAX_UPRIGHT_HEIGHT_IN):
+                    if upright_height > MAX_UPRIGHT_HEIGHT_IN:
                         continue
                     brace_ratio_actual = pallet.center_height / upright_height if upright_height > 0 else 0.0
                     if brace_ratio_actual <= self.brace_height_ratio_required:
@@ -1045,8 +1025,8 @@ class MixedJobOptimizer(BaseOptimizer):
         """Balance is judged on total unit quantity per side only (top vs bottom),
         regardless of which configurations make up each side."""
         diff = abs(int(units_top) - int(units_bottom))
-        if diff <= 1:
-            return 'Balanced', float(diff)
+        if diff == 0:
+            return 'Balanced', 0.0
         if diff <= 2:
             return 'Slight imbalance', float(diff)
         return 'High imbalance risk', float(diff)
@@ -1555,7 +1535,7 @@ def _pallet_png_bytes(
     width: int = 900,
     height: int = 500,
 ) -> bytes:
-    """Render a pallet bottom-view layout to PNG bytes using matplotlib.
+    """Render a pallet top-view layout to PNG bytes using matplotlib.
 
     This is a browser-free replacement for the kaleido/Plotly image path,
     so PDF generation works on headless servers (e.g. Streamlit Cloud)
@@ -1596,16 +1576,16 @@ def _pallet_png_bytes(
     # Vertical bands (A-Buck banding rule), drawn across the full pallet width
     band_count = required_vertical_bands(pallet.base_length)
     for bx in vertical_band_positions(pallet.base_length, band_count):
-        ax.plot([bx, bx], [0, pallet.base_width], color=BAND_COLOR, linewidth=2.2, alpha=0.9, zorder=5)
+        ax.plot([bx, bx], [0, pallet.base_width], color=BAND_COLOR, linewidth=2.2, alpha=BAND_ALPHA, zorder=5)
         ax.text(bx, pallet.base_width - 0.6, 'BAND', ha='center', va='top', fontsize=7,
-                color=BAND_COLOR, fontweight='bold', zorder=6)
+                color=BAND_COLOR, alpha=BAND_ALPHA, fontweight='bold', zorder=6)
 
     ax.set_xlim(0, pallet.base_length)
     ax.set_ylim(0, pallet.base_width)
     ax.set_aspect('equal', adjustable='box')
     ax.set_xlabel('Pallet Length (inches)')
     ax.set_ylabel('Pallet Width / Side Depth (inches)')
-    ax.set_title(f'{title}\n{band_count} vertical bands required', fontsize=10)
+    ax.set_title(title)
     ax.grid(True, color='#e6e6e6', linewidth=0.6)
     ax.set_axisbelow(True)
     fig.tight_layout()
@@ -1634,7 +1614,6 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
                       marker=dict(size=8, color='rgba(0,0,0,0)'),
                       hovertemplate=(
                           f'Config: {p.config_label}<br>'
-                          f'Pallet: {p.pallet_id}<br>'
                           f'Unit #{p.unit_number}<br>'
                           f'Side: {p.side}<br>'
                           f'Row: {p.row_number}<br>'
@@ -1662,18 +1641,24 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
     band_count = required_vertical_bands(pallet.base_length)
     for i, bx in enumerate(vertical_band_positions(pallet.base_length, band_count), start=1):
         fig.add_shape(type='line', x0=bx, y0=0, x1=bx, y1=pallet.base_width,
-                      line=dict(color=BAND_COLOR, width=3))
+                      line=dict(color=BAND_COLOR_RGBA, width=3))
         fig.add_annotation(x=bx, y=pallet.base_width, text=f'Band {i}', showarrow=False,
-                           yanchor='bottom', font=dict(size=11, color=BAND_COLOR))
+                           yanchor='bottom', font=dict(size=11, color=BAND_COLOR_RGBA))
     fig.update_xaxes(title='Pallet Length (inches)', range=[0, pallet.base_length], showgrid=True, zeroline=False, scaleanchor='y', scaleratio=1)
     fig.update_yaxes(title='Pallet Width / Side Depth (inches)', range=[0, pallet.base_width], showgrid=True, zeroline=False)
-    fig.update_layout(title=f'{title} — {band_count} vertical bands required', height=560, margin=dict(l=20, r=20, t=60, b=20), plot_bgcolor='white', hovermode='closest')
+    fig.update_layout(title=title, height=560, margin=dict(l=20, r=20, t=60, b=20), plot_bgcolor='white', hovermode='closest')
     return fig
 
 
 def render_packaging_notes(pallet: Pallet) -> None:
     """Banding count + tether reminder shown under the interactive preview."""
     bands = required_vertical_bands(pallet.base_length)
+    st.info(
+        f'**Banding:** {bands} vertical bands required for the {pallet.base_length:.0f}" package '
+        f'(green lines). {BANDING_RULE_TEXT}\n\n'
+        f'**Tether:** {TETHER_NOTE_TEXT}\n\n'
+        f'**Height:** {HEIGHT_RULE_TEXT}'
+    )
 
 def clean_string_values(series: pd.Series) -> List[str]:
     return sorted(series.astype('string').dropna().unique().tolist())
@@ -1781,7 +1766,7 @@ def pallet_mix_table(pallet_mix: Dict[str, int], optimizer: BaseOptimizer) -> pd
 # Pallet settings editor
 
 PALLET_NUMERIC_FIELDS = ['base_length', 'base_width', 'center_height', 'center_depth',
-                         'max_depth_per_side', 'max_height', 'max_length',
+                         'max_depth_per_side', 'max_length',
                          'usable_space_per_side', 'pallet_cost']
 
 
@@ -1793,7 +1778,8 @@ def render_pallet_settings(config: dict) -> None:
     st.caption(
         'Edit pallet sizes and costs directly in the table. Use the empty row at the bottom to add a new '
         'pallet size; select a row and use the trash icon to remove one. Press Save to write the changes '
-        f'to {DEFAULT_CONFIG_PATH.name} — they take effect immediately in both optimizer modes.'
+        f'to {DEFAULT_CONFIG_PATH.name} — they take effect immediately in both optimizer modes. '
+        f'Max upright height is fixed at {MAX_UPRIGHT_HEIGHT_IN:.0f}" for every pallet and is not editable here.'
     )
     pallets_df = pd.DataFrame([{k: p.get(k) for k in ['pallet_id'] + PALLET_NUMERIC_FIELDS} for p in config['pallets']])
     edited_df = st.data_editor(
@@ -1809,7 +1795,6 @@ def render_pallet_settings(config: dict) -> None:
             'center_height': st.column_config.NumberColumn('Center Height (in)', min_value=0.0, step=0.5),
             'center_depth': st.column_config.NumberColumn('Center Depth (in)', min_value=0.0, step=0.5),
             'max_depth_per_side': st.column_config.NumberColumn('Max Depth / Side (in)', min_value=0.0, step=0.5),
-            'max_height': st.column_config.NumberColumn('Max Height (in)', min_value=0.0, step=0.5, help=f'Per-pallet limit. The global {MAX_UPRIGHT_HEIGHT_IN:.0f}" hard cap from the A-Buck guideline always applies on top of this value.'),
             'max_length': st.column_config.NumberColumn('Max Length (in)', min_value=0.0, step=0.5),
             'usable_space_per_side': st.column_config.NumberColumn('Usable Area / Side (sq in)', min_value=0.0, step=1.0, help='Leave 0 or blank to auto-calculate as Max Length × Max Depth / Side on save.'),
             'pallet_cost': st.column_config.NumberColumn('Pallet Cost ($)', min_value=0.0, step=0.1, format='$%.2f'),
@@ -1866,7 +1851,7 @@ def render_pallet_settings(config: dict) -> None:
 
 # Main UI
 def main():
-    st.set_page_config(page_title='Pallet Optimizer V4.7', layout='wide')
+    st.set_page_config(page_title='Pallet Optimizer V4.8', layout='wide')
     apply_custom_css()
 
     ensure_data_files()  # first-run setup: seed default config + depth files
@@ -1884,7 +1869,7 @@ def main():
 
     mode = st.sidebar.radio('Mode', ['By Configuration', 'By Job', 'Pallet Settings'], index=0)
     if mode != 'Pallet Settings':
-        st.sidebar.caption(f'Upright height hard cap: {MAX_UPRIGHT_HEIGHT_IN:.0f}"')
+        st.sidebar.caption(f'Upright height hard cap: {MAX_UPRIGHT_HEIGHT_IN:.0f}" (A-Buck guideline).')
         allowable_pallets = st.sidebar.multiselect('Allowable Pallets', options=all_pallet_ids, default=all_pallet_ids, help='Select the pallet sizes the optimizer is allowed to use in the current mode.')
 
     if mode == 'Pallet Settings':
@@ -1978,7 +1963,7 @@ def main():
                 st.session_state[selector_key] = selected_pallet_num
                 units_on_selected_pallet = optimizer.units_for_pallet_sequence(job.qty, best.max_units_per_pallet or 1, selected_pallet_num)
                 selected_preview = optimizer.build_preview_for_units(chosen_pallet, best, units_on_selected_pallet, selected_pallet_num)
-                st.plotly_chart(build_plotly_preview(chosen_pallet, selected_preview.placements or [], f'Interactive Bottom View — {chosen_pallet.pallet_id} — Pallet #{selected_pallet_num}'), use_container_width=True)
+                st.plotly_chart(build_plotly_preview(chosen_pallet, selected_preview.placements or [], f'Interactive Top View — {chosen_pallet.pallet_id} — Pallet #{selected_pallet_num}'), use_container_width=True)
                 render_packaging_notes(chosen_pallet)
         with tab3:
             if show_all:
@@ -2213,7 +2198,7 @@ def main():
                 st.session_state[selector_key] = selected_pallet_num
                 selected_load = best_job.pallet_loads[selected_pallet_num - 1]
                 chosen_pallet = optimizer.pallet_by_id(selected_load.pallet_id)
-                st.plotly_chart(build_plotly_preview(chosen_pallet, selected_load.placements, f'Interactive Bottom View — {chosen_pallet.pallet_id} — Job Pallet #{selected_load.pallet_number}'), use_container_width=True)
+                st.plotly_chart(build_plotly_preview(chosen_pallet, selected_load.placements, f'Interactive Top View — {chosen_pallet.pallet_id} — Job Pallet #{selected_load.pallet_number}'), use_container_width=True)
                 render_packaging_notes(chosen_pallet)
             else:
                 st.info('Add or update at least one valid configuration to preview a job pallet.')
