@@ -50,15 +50,6 @@ GUIDELINE_HEIGHT_ALLOWANCE_IN   = 18.0   # content may extend this far above the
 MAX_UPRIGHT_HEIGHT_IN           = 70.0   # HARD CAP applied by this tool, held below the 74" guideline
 
 BAND_COLOR = '#2e8b57'
-BAND_ALPHA = 0.30  # 0 = invisible, 
-
-ax.fill_between(
-    x,
-    lower_bound,
-    upper_bound,
-    color=BAND_COLOR,
-    alpha=BAND_ALPHA
-)
 
 BANDING_RULE_TEXT = (
     'Vertical banding: at least 2 vertical bands on every package. Packages 72" to 96" long '
