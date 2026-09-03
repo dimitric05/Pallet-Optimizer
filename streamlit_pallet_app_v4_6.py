@@ -1869,7 +1869,7 @@ def main():
 
     mode = st.sidebar.radio('Mode', ['By Configuration', 'By Job', 'Pallet Settings'], index=0)
     if mode != 'Pallet Settings':
-        st.sidebar.caption(f'Upright height hard cap: {MAX_UPRIGHT_HEIGHT_IN:.0f}" (A-Buck guideline).')
+        st.sidebar.caption(f'Upright height hard cap: {MAX_UPRIGHT_HEIGHT_IN:.0f}".')
         allowable_pallets = st.sidebar.multiselect('Allowable Pallets', options=all_pallet_ids, default=all_pallet_ids, help='Select the pallet sizes the optimizer is allowed to use in the current mode.')
 
     if mode == 'Pallet Settings':
