@@ -1604,7 +1604,7 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
     fig.add_shape(type='rect', x0=0, y0=0, x1=pallet.base_length, y1=pallet.max_depth_per_side, line=dict(color='rgba(0,0,0,0)'), fillcolor='rgba(255,193,140,0.18)')
     fig.add_shape(type='rect', x0=0, y0=pallet.max_depth_per_side, x1=pallet.base_length, y1=pallet.max_depth_per_side + pallet.center_depth, line=dict(color='black', width=2), fillcolor='rgba(160,160,160,0.65)')
     fig.add_shape(type='rect', x0=0, y0=pallet.max_depth_per_side + pallet.center_depth, x1=pallet.base_length, y1=pallet.base_width, line=dict(color='rgba(0,0,0,0)'), fillcolor='rgba(255,193,140,0.18)')
-    fig.add_annotation(x=pallet.base_length / 2, y=pallet.max_depth_per_side + pallet.center_depth / 2, text='Center Frame', showarrow=False, font=dict(size=12, color='black'))
+    fig.add_annotation(x=pallet.base_length / 2, y=pallet.max_depth_per_side + pallet.center_depth / 2, text='Center Frame', showarrow=False, font=dict(size=10, color='black'))
     for p in placements:
         cx, cy = p.x + p.length / 2, p.y + p.depth / 2
         fig.add_shape(type='rect', x0=p.x, y0=p.y, x1=p.x + p.length, y1=p.y + p.depth,
