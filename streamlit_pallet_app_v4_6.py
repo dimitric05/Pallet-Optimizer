@@ -1674,12 +1674,6 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
 def render_packaging_notes(pallet: Pallet) -> None:
     """Banding count + tether reminder shown under the interactive preview."""
     bands = required_vertical_bands(pallet.base_length)
-    st.info(
-        f'**Banding:** {bands} vertical bands required for the {pallet.base_length:.0f}" package '
-        f'(green lines). {BANDING_RULE_TEXT}\n\n'
-        f'**Tether:** {TETHER_NOTE_TEXT}\n\n'
-        f'**Height:** {HEIGHT_RULE_TEXT}'
-    )
 
 def clean_string_values(series: pd.Series) -> List[str]:
     return sorted(series.astype('string').dropna().unique().tolist())
