@@ -1699,6 +1699,43 @@ def get_config_color(config_id: int) -> str:
     return palette[(config_id - 1) % len(palette)]
 
 
+# Unit label sizing (interactive preview and PDF images).
+# Labels shrink to fit each unit's box. These limits are the knobs:
+UNIT_LABEL_MAX_PX = 16      # interactive preview, largest label size (pixels)
+UNIT_LABEL_MIN_PX = 7       # interactive preview, below this the label is dropped (hover still works)
+UNIT_LABEL_MAX_PT = 9       # PDF images, largest label size (points)
+UNIT_LABEL_MIN_PT = 4       # PDF images, below this the label is dropped
+UNIT_LABEL_FILL = 0.70      # share of the box height/width the text may use
+PREVIEW_HEIGHT_PX = 560     # interactive chart height
+PREVIEW_EST_WIDTH_PX = 1150 # typical chart width in Streamlit wide layout; used to estimate scale
+
+
+def fit_unit_label(config_label: str, orientation: str, box_w_px: float, box_h_px: float,
+                   max_size: float, min_size: float) -> Tuple[Optional[List[str]], float]:
+    """Pick the label lines and font size that fit inside one unit box.
+    Tries 'label + orientation' first, then just the label; returns (None, 0)
+    if neither fits at min_size. Sizes are in the same unit as box_w/h (px)
+    and assume a character is about 0.6 x font size wide and lines are 1.25 x
+    font size tall (1.35 with line spacing)."""
+    for lines in ([config_label, orientation], [config_label]):
+        n_lines = len(lines)
+        longest = max(len(t) for t in lines) or 1
+        by_h = box_h_px * UNIT_LABEL_FILL / (n_lines * 1.35)
+        by_w = box_w_px * UNIT_LABEL_FILL / (longest * 0.6)
+        size = min(max_size, by_h, by_w)
+        if size >= min_size:
+            return lines, size
+    return None, 0.0
+
+
+def preview_px_per_inch(pallet: Pallet) -> float:
+    """Approximate screen pixels per inch in the interactive preview. The axes
+    are locked 1:1, so the tighter of height and width sets the scale."""
+    usable_h = PREVIEW_HEIGHT_PX - 80   # top/bottom margins + title
+    usable_w = PREVIEW_EST_WIDTH_PX - 80
+    return min(usable_h / max(pallet_plot_width(pallet), 1.0), usable_w / max(pallet.base_length, 1.0))
+
+
 def pallet_plot_width(pallet: Pallet) -> float:
     """Y extent of the drawing. Uses base width, but never cuts off the
     load zone if an L-frame's back wall + load depth exceed it."""
@@ -1756,13 +1793,10 @@ def _pallet_png_bytes(
         ax.text(pallet.base_length / 2, pallet.max_depth_per_side + pallet.center_depth / 2,
                 'Center Frame', ha='center', va='center', fontsize=11, color='black')
 
-    # Placed units
+    # Placed units (labels are added after layout so they can be sized to fit)
     for p in placements:
         ax.add_patch(Rectangle((p.x, p.y), p.length, p.depth,
                                fill=False, edgecolor=get_config_color(p.config_id), linewidth=1.8))
-        ax.text(p.x + p.length / 2, p.y + p.depth / 2,
-                f'{p.config_label}\n{p.orientation}',
-                ha='center', va='center', fontsize=7, color=(0, 0, 0, 0.75))
 
     # Vertical bands (A-Buck banding rule), drawn across the full pallet width
     band_count = required_vertical_bands(pallet.base_length)
@@ -1781,6 +1815,18 @@ def _pallet_png_bytes(
     ax.set_axisbelow(True)
     fig.tight_layout()
 
+    # Unit labels sized to each box. Measure the final axes scale first.
+    ax.apply_aspect()
+    px_per_in = ax.get_window_extent().width / max(pallet.base_length, 1.0)
+    pt_per_px = 72.0 / dpi
+    for p in placements:
+        lines, size_pt = fit_unit_label(p.config_label, p.orientation,
+                                        p.length * px_per_in * pt_per_px, p.depth * px_per_in * pt_per_px,
+                                        UNIT_LABEL_MAX_PT, UNIT_LABEL_MIN_PT)
+        if lines:
+            ax.text(p.x + p.length / 2, p.y + p.depth / 2, '\n'.join(lines),
+                    ha='center', va='center', fontsize=size_pt, color=(0, 0, 0, 0.75))
+
     out = io.BytesIO()
     fig.savefig(out, format='png', dpi=dpi)
     plt.close(fig)
@@ -1796,13 +1842,15 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
     if pallet.pallet_style == FRAME_STYLE_L:
         fig.add_shape(type='rect', x0=0, y0=0, x1=pallet.base_length, y1=pallet.center_depth, line=dict(color='black', width=2), fillcolor='rgba(160,160,160,0.65)')
         fig.add_shape(type='rect', x0=0, y0=pallet.center_depth, x1=pallet.base_length, y1=pallet.center_depth + pallet.max_depth_per_side, line=dict(color='rgba(0,0,0,0)'), fillcolor='rgba(255,193,140,0.18)')
-        fig.add_annotation(x=pallet.base_length / 2, y=pallet.center_depth / 2, text='Back Wall (Upright Brace)', showarrow=False, font=dict(size=16, color='black'))
+        wall_font = max(8.0, min(16.0, pallet.center_depth * preview_px_per_inch(pallet) * 0.75))
+        fig.add_annotation(x=pallet.base_length / 2, y=pallet.center_depth / 2, text='Back Wall (Upright Brace)', showarrow=False, font=dict(size=wall_font, color='black'))
         fig.add_annotation(x=1, y=plot_w, text='FRONT (load side)', showarrow=False, xanchor='left', yanchor='top', font=dict(size=12, color='#555555'))
     else:
         fig.add_shape(type='rect', x0=0, y0=0, x1=pallet.base_length, y1=pallet.max_depth_per_side, line=dict(color='rgba(0,0,0,0)'), fillcolor='rgba(255,193,140,0.18)')
         fig.add_shape(type='rect', x0=0, y0=pallet.max_depth_per_side, x1=pallet.base_length, y1=pallet.max_depth_per_side + pallet.center_depth, line=dict(color='black', width=2), fillcolor='rgba(160,160,160,0.65)')
         fig.add_shape(type='rect', x0=0, y0=pallet.max_depth_per_side + pallet.center_depth, x1=pallet.base_length, y1=pallet.base_width, line=dict(color='rgba(0,0,0,0)'), fillcolor='rgba(255,193,140,0.18)')
         fig.add_annotation(x=pallet.base_length / 2, y=pallet.max_depth_per_side + pallet.center_depth / 2, text='Center Frame', showarrow=False, font=dict(size=20, color='black'))
+    px_per_in = preview_px_per_inch(pallet)
     for p in placements:
         cx, cy = p.x + p.length / 2, p.y + p.depth / 2
         fig.add_shape(type='rect', x0=p.x, y0=p.y, x1=p.x + p.length, y1=p.y + p.depth,
@@ -1821,20 +1869,21 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
                       ),
                       showlegend=False))
                 
-        fig.add_trace(go.Scatter(
-            x=[cx],
-            y=[cy],
-            text=[f"{p.config_label}<br>{p.orientation}"],
-            mode='text',
-        
-            textfont=dict(
-                size=18,  # bump slightly for two lines
-                color='rgba(0,0,0,0.7)'
-            ),
-            textposition='middle center',
-            hoverinfo='skip',
-            showlegend=False
-        ))
+        # Label sized to fit the unit box (see UNIT_LABEL_* constants).
+        lines, size_px = fit_unit_label(p.config_label, p.orientation,
+                                        p.length * px_per_in, p.depth * px_per_in,
+                                        UNIT_LABEL_MAX_PX, UNIT_LABEL_MIN_PX)
+        if lines:
+            fig.add_trace(go.Scatter(
+                x=[cx],
+                y=[cy],
+                text=['<br>'.join(lines)],
+                mode='text',
+                textfont=dict(size=size_px, color='rgba(0,0,0,0.7)'),
+                textposition='middle center',
+                hoverinfo='skip',
+                showlegend=False
+            ))
     # Vertical bands (A-Buck banding rule), drawn across the full pallet width
     band_count = required_vertical_bands(pallet.base_length)
     for i, bx in enumerate(vertical_band_positions(pallet.base_length, band_count), start=1):
@@ -1844,7 +1893,7 @@ def build_plotly_preview(pallet: Pallet, placements: List[Placement], title: str
                            yanchor='bottom', font=dict(size=11, color=BAND_COLOR_RGBA))
     fig.update_xaxes(title='Pallet Length (inches)', range=[0, pallet.base_length], showgrid=True, zeroline=False, scaleanchor='y', scaleratio=1)
     fig.update_yaxes(title=('Back Wall to Front (inches)' if pallet.pallet_style == FRAME_STYLE_L else 'Pallet Width / Side Depth (inches)'), range=[0, plot_w], showgrid=True, zeroline=False)
-    fig.update_layout(title=title, height=560, margin=dict(l=20, r=20, t=60, b=20), plot_bgcolor='white', hovermode='closest')
+    fig.update_layout(title=title, height=PREVIEW_HEIGHT_PX, margin=dict(l=20, r=20, t=60, b=20), plot_bgcolor='white', hovermode='closest')
     return fig
 
 
@@ -1999,6 +2048,57 @@ def _pallet_column_config(style: str) -> dict:
     }
 
 
+def pallet_geometry_errors(entry: dict, style: str, use_two_sides: bool = True) -> List[str]:
+    """Checks that the load area fits on the pallet base, so the preview and the
+    optimizer never place windows outside the pallet. Returns messages; empty
+    means OK."""
+    def num(k):
+        try:
+            return float(entry.get(k) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    errs: List[str] = []
+    base_len, base_w = num('base_length'), num('base_width')
+    max_len, wall_d, load_d = num('max_length'), num('center_depth'), num('max_depth_per_side')
+    if max_len > base_len + 1e-9:
+        errs.append(f'Max Length ({max_len:g}") is longer than Base Length ({base_len:g}").')
+    if style == FRAME_STYLE_L:
+        need = wall_d + load_d
+        if need > base_w + 1e-9:
+            errs.append(f'Back Wall Depth + Max Load Depth ({wall_d:g}" + {load_d:g}" = {need:g}") is more than Base Width ({base_w:g}").')
+    else:
+        sides = 2 if use_two_sides else 1
+        need = wall_d + sides * load_d
+        if need > base_w + 1e-9:
+            errs.append(f'Center Depth + {sides} x Max Depth / Side ({wall_d:g}" + {sides} x {load_d:g}" = {need:g}") is more than Base Width ({base_w:g}").')
+    return errs
+
+
+def usable_area_error(entry: dict) -> Optional[str]:
+    try:
+        area = float(entry.get('usable_space_per_side') or 0.0)
+        cap = float(entry.get('max_length') or 0.0) * float(entry.get('max_depth_per_side') or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if area > cap + 1e-6:
+        return (f'Usable Area ({area:g} sq in) is more than Max Length x Max Depth ({cap:g} sq in). '
+                f'Leave it at 0 to auto-calculate.')
+    return None
+
+
+def invalid_pallets_in_config(config: dict) -> Dict[str, List[str]]:
+    """Pallets in the saved file whose geometry would place windows off the
+    pallet (e.g. a hand-edited JSON). These are blocked from the optimizer."""
+    two = bool(config.get('global_rules', {}).get('use_two_sides', True))
+    bad: Dict[str, List[str]] = {}
+    for style, key in ((FRAME_STYLE_A, 'pallets'), (FRAME_STYLE_L, 'pallets_l')):
+        for p in config.get(key, []) or []:
+            errs = pallet_geometry_errors(p, style, two)
+            if errs:
+                bad[str(p.get('pallet_id'))] = errs
+    return bad
+
+
 def _pallets_to_df(pallets: List[dict]) -> pd.DataFrame:
     rows = []
     for p in pallets:
@@ -2011,7 +2111,8 @@ def _pallets_to_df(pallets: List[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _clean_pallet_rows(edited_df: pd.DataFrame, group_name: str, seen_ids: set, errors: List[str]) -> List[dict]:
+def _clean_pallet_rows(edited_df: pd.DataFrame, group_name: str, seen_ids: set, errors: List[str],
+                       style: str = FRAME_STYLE_A, use_two_sides: bool = True) -> List[dict]:
     cleaned: List[dict] = []
     required_positive = [f for f in PALLET_NUMERIC_FIELDS if f not in ('usable_space_per_side', 'pallet_cost', 'max_height')]
     for row_no, (_, row) in enumerate(edited_df.iterrows(), start=1):
@@ -2042,6 +2143,14 @@ def _clean_pallet_rows(edited_df: pd.DataFrame, group_name: str, seen_ids: set, 
                     row_ok = False
         if not row_ok:
             continue
+        geo = pallet_geometry_errors(entry, style, use_two_sides)
+        area_err = usable_area_error(entry) if entry['usable_space_per_side'] > 0 else None
+        if area_err:
+            geo.append(area_err)
+        if geo:
+            for g in geo:
+                errors.append(f'{group_name} row {row_no} ({pid}): {g}')
+            continue
         if entry['usable_space_per_side'] <= 0:
             entry['usable_space_per_side'] = entry['max_length'] * entry['max_depth_per_side']
         if entry['max_height'] <= 0:
@@ -2059,8 +2168,14 @@ def render_pallet_settings(config: dict) -> None:
         'Edit pallet sizes and costs directly in the tables. Use the empty row at the bottom of a table to add a new '
         'pallet size; select a row and use the trash icon to remove one. Press Save to write both groups '
         f'to {DEFAULT_CONFIG_PATH.name}. Changes take effect immediately in both optimizer modes. '
-        f'Max Upright Height defaults to {MAX_UPRIGHT_HEIGHT_IN:.0f}" on every pallet and can be changed per pallet.'
+        f'Max Upright Height defaults to {MAX_UPRIGHT_HEIGHT_IN:.0f}" on every pallet and can be changed per pallet. '
+        'Save is blocked if the load area does not fit the base: Max Length must not exceed Base Length; '
+        'A-frame Center Depth + 2 x Max Depth / Side, and L-frame Back Wall Depth + Max Load Depth, must not exceed Base Width.'
     )
+    bad_saved = invalid_pallets_in_config(config)
+    if bad_saved:
+        st.error('These saved pallets have a load area that does not fit the base and are blocked from the optimizer '
+                 'until fixed and saved: ' + '; '.join(f'**{pid}**: {" ".join(e)}' for pid, e in bad_saved.items()))
 
     st.markdown('#### A-Frame Pallets')
     st.caption(A_LOADING_RULE_TEXT)
@@ -2084,8 +2199,9 @@ def render_pallet_settings(config: dict) -> None:
     if st.button('Save Pallet Settings', type='primary'):
         errors: List[str] = []
         seen_ids: set = set()
-        cleaned_a = _clean_pallet_rows(edited_a, 'A-Frame', seen_ids, errors)
-        cleaned_l = _clean_pallet_rows(edited_l, 'L-Frame', seen_ids, errors)
+        two = bool(config.get('global_rules', {}).get('use_two_sides', True))
+        cleaned_a = _clean_pallet_rows(edited_a, 'A-Frame', seen_ids, errors, FRAME_STYLE_A, two)
+        cleaned_l = _clean_pallet_rows(edited_l, 'L-Frame', seen_ids, errors, FRAME_STYLE_L, two)
         if not cleaned_a and not cleaned_l and not errors:
             errors.append('At least one pallet is required.')
         if errors:
@@ -2106,7 +2222,7 @@ def render_pallet_settings(config: dict) -> None:
 
 # Main UI
 def main():
-    st.set_page_config(page_title='Pallet Optimizer V5.0', layout='wide')
+    st.set_page_config(page_title='Pallet Optimizer V5.1', layout='wide')
     apply_custom_css()
 
     ensure_data_files()  # first-run setup: seed default config + depth files
@@ -2114,8 +2230,9 @@ def main():
     depth_df = load_depths(str(DEFAULT_DEPTH_CSV_PATH))
     lookup = ProductDepthLookup(depth_df)
 
-    a_pallet_ids = [p['pallet_id'] for p in config.get('pallets', [])]
-    l_pallet_ids = [p['pallet_id'] for p in config.get('pallets_l', [])]
+    bad_pallets = invalid_pallets_in_config(config)
+    a_pallet_ids = [p['pallet_id'] for p in config.get('pallets', []) if str(p.get('pallet_id')) not in bad_pallets]
+    l_pallet_ids = [p['pallet_id'] for p in config.get('pallets_l', []) if str(p.get('pallet_id')) not in bad_pallets]
 
     if 'job_items_v37' not in st.session_state:
         st.session_state['job_items_v37'] = build_default_job_items(lookup)
@@ -2137,6 +2254,8 @@ def main():
             frame_ids = a_pallet_ids + l_pallet_ids
         if frame_choice != 'A-Frame' and not l_pallet_ids:
             st.sidebar.warning('No L-frame pallets are defined yet. Add them in Pallet Settings > L-Frame Pallets.')
+        if bad_pallets:
+            st.sidebar.error('Blocked (load area does not fit the base, fix in Pallet Settings): ' + ', '.join(bad_pallets))
         st.sidebar.caption(f'Upright height: {MAX_UPRIGHT_HEIGHT_IN:.0f}" default cap, adjustable per pallet in Pallet Settings.')
         allowable_pallets = st.sidebar.multiselect('Allowable Pallets', options=frame_ids, default=frame_ids, key=f'allowable_pallets_v50_{frame_choice}', help='Select the pallet sizes the optimizer is allowed to use in the current mode.')
 
