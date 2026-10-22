@@ -24,7 +24,7 @@
       "max_length": 72.0,
       "usable_space_per_side": 1470.0,
       "price_per_usable_sq_in": 0.0,
-      "pallet_cost": 161.90
+      "pallet_cost": 161.9
     },
     {
       "pallet_id": "96x46",
@@ -37,7 +37,7 @@
       "max_length": 96.0,
       "usable_space_per_side": 1974.0,
       "price_per_usable_sq_in": 0.0,
-      "pallet_cost": 182.50
+      "pallet_cost": 182.5
     },
     {
       "pallet_id": "108x46",
@@ -50,7 +50,7 @@
       "max_length": 108.0,
       "usable_space_per_side": 2226.0,
       "price_per_usable_sq_in": 0.0,
-      "pallet_cost": 200.20
+      "pallet_cost": 200.2
     },
     {
       "pallet_id": "120x46",
@@ -64,6 +64,73 @@
       "usable_space_per_side": 2478.0,
       "price_per_usable_sq_in": 0.0,
       "pallet_cost": 205.35
+    }
+  ],
+  "pallets_l": [
+    {
+      "pallet_id": "L-60x30",
+      "base_length": 60.0,
+      "base_width": 30.0,
+      "center_height": 56.0,
+      "center_depth": 4.0,
+      "max_depth_per_side": 24.0,
+      "max_height": 84.0,
+      "max_length": 60.0,
+      "usable_space_per_side": 1440.0,
+      "price_per_usable_sq_in": 0.0,
+      "pallet_cost": 125.0
+    },
+    {
+      "pallet_id": "L-72x30",
+      "base_length": 72.0,
+      "base_width": 30.0,
+      "center_height": 56.0,
+      "center_depth": 4.0,
+      "max_depth_per_side": 24.0,
+      "max_height": 84.0,
+      "max_length": 72.0,
+      "usable_space_per_side": 1728.0,
+      "price_per_usable_sq_in": 0.0,
+      "pallet_cost": 132.5
+    },
+    {
+      "pallet_id": "L-96x30",
+      "base_length": 96.0,
+      "base_width": 30.0,
+      "center_height": 56.0,
+      "center_depth": 4.0,
+      "max_depth_per_side": 24.0,
+      "max_height": 84.0,
+      "max_length": 96.0,
+      "usable_space_per_side": 2304.0,
+      "price_per_usable_sq_in": 0.0,
+      "pallet_cost": 148.0
+    },
+    {
+      "pallet_id": "L-108x30",
+      "base_length": 108.0,
+      "base_width": 30.0,
+      "center_height": 56.0,
+      "center_depth": 4.0,
+      "max_depth_per_side": 24.0,
+      "max_height": 84.0,
+      "max_length": 108.0,
+      "usable_space_per_side": 2592.0,
+      "price_per_usable_sq_in": 0.0,
+      "pallet_cost": 160.75
+    },
+    {
+      "pallet_id": "L-120x30",
+      "base_length": 120.0,
+      "base_width": 30.0,
+      "center_height": 56.0,
+      "center_depth": 4.0,
+      "max_depth_per_side": 24.0,
+      "max_height": 84.0,
+      "max_length": 120.0,
+      "usable_space_per_side": 2880.0,
+      "price_per_usable_sq_in": 0.0,
+      "pallet_cost": 172.25
     }
   ],
   "global_rules": {
